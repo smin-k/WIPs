@@ -1,4 +1,4 @@
-# WIP-6: Verifiable Coin Toss (VCT): Balance-Gated VRF-ECCPoW Consensus
+# WIP-6: Verifiable Coin Toss (VCT): 잔액 기반 VRF-ECCPoW 합의 프로토콜
 
 <pre>
   Title: Verifiable Coin Toss (VCT): Balance-Gated VRF-ECCPoW Consensus
@@ -9,83 +9,104 @@
   License: GNU Lesser General Public License v3.0
 </pre>
 
-## Table of Contents
-* [Abstract](#abstract)
-* [Motivation](#motivation)
-* [Specification](#specification)
-  - [System Model](#system-model)
-  - [Verifiable Coin Toss Function](#verifiable-coin-toss-function)
-  - [Block Production and Validation](#block-production-and-validation)
-  - [Dynamic p Adjustment](#dynamic-p-adjustment)
-* [Security Analysis](#security-analysis)
-* [Implementation](#implementation)
-* [References](#references)
+## 목차
+* [개요](#개요)
+* [동기](#동기)
+* [명세](#명세)
+  - [시스템 모델](#시스템-모델)
+  - [ECVRF 구조](#ecvrf-구조)
+  - [Verifiable Coin Toss 함수](#verifiable-coin-toss-함수)
+  - [블록 생성 및 검증](#블록-생성-및-검증)
+  - [p 조정](#p-조정)
+* [보안 분석](#보안-분석)
+* [구현](#구현)
+* [참고문헌](#참고문헌)
 
-## Abstract
+## 개요
 
-This document describes the Verifiable Coin Toss (VCT) protocol, a consensus mechanism for the WorldLand blockchain that combines balance-threshold account eligibility, Verifiable Random Function (VRF)-based mining selection, account signature binding, and ECCPoW-based block production.
+이 문서는 WorldLand 블록체인을 위한 합의 메커니즘인 Verifiable Coin Toss (VCT) 프로토콜을 설명한다. VCT는 잔액 임계값 기반 채굴 자격 조건, secp256k1 기반 VRF 선발, 계정 바인딩 ECCPoW, Nakamoto 방식의 최대 유효 작업량 포크 선택을 결합한다.
 
-In every block, each balance-qualified account independently evaluates a VRF over the previous block hash to decide whether it earns the right to attempt ECCPoW. With a network-tunable acceptance probability $p$, only an expected $pN = T$ of $N$ eligible accounts become eligible to mine per block, reducing the expected active ECCPoW population from $N$ to $T$ while preserving a Nakamoto-style heaviest-valid-work fork-choice rule. A valid block must also include an account-level signature binding the ECCPoW solution to the balance-qualified account, preventing unauthorized reuse of a copied VRF eligibility proof.
+각 블록 높이에서, 부모 상태 잔액이 $S_0$ 이상인 계정은 자신의 계정 키를 사용하여 부모 블록 해시와 목표 높이에 대해 secp256k1 기반 VRF를 평가할 수 있다. VRF 출력이 네트워크 자격 임계값 $p$ 미만이면 해당 계정은 ECCPoW를 시도할 자격을 얻는다. 생성된 블록에는 계정 공개 키, VRF 출력, VRF 증명, ECCPoW nonce, 최종 블록 커밋먼트에 대한 계정 서명이 포함되어야 한다.
 
-VCT is not stake-weighted PoS. Holding more than the threshold balance $S_0$ in a single account does not increase that account's eligibility probability. Instead, $S_0$ acts as a minimum economic eligibility condition. Each qualified account receives exactly one VRF eligibility trial per block.
+VCT는 검증자 레지스트리나 지분 가중 리더 선출을 도입하지 않는다. 단일 계정에 $S_0$ 이상을 보유해도 해당 계정의 자격 확률은 증가하지 않는다. 여러 자격 시도를 원하는 참여자는 각각 잔액 임계값을 충족하는 여러 계정을 유지해야 한다.
 
-Changing the consensus mechanism modifies the core protocol, thus triggering a hard fork in the blockchain. After this update is made, nodes following the updated protocol will no longer accept blocks mined by nodes following the deprecated protocol, and vice versa.
+합의 메커니즘의 변경은 핵심 프로토콜을 수정하므로 블록체인의 하드 포크를 유발한다. 업데이트된 프로토콜을 따르는 노드는 이전 프로토콜을 따르는 노드가 채굴한 블록을 더 이상 수락하지 않으며, 그 역도 마찬가지다.
 
-## Motivation
+## 동기
 
-Proof-of-Work (PoW) systems provide unparalleled censorship resistance but consume energy at industrial scale, as all nodes compete in every block. Proof-of-Stake (PoS) systems achieve dramatic energy reduction at the cost of replacing physical-world cost with capital-weighted voting.
+PoW(Proof-of-Work) 시스템은 탁월한 검열 저항성을 제공하지만, 모든 노드가 매 블록 경쟁하기 때문에 산업적 규모의 에너지를 소비한다. PoS(Proof-of-Stake) 시스템은 물리적 비용을 자본 가중 투표로 대체하는 대가로 극적인 에너지 절감을 달성한다.
 
-The VCT protocol occupies a different position. The threshold balance $S_0$ provides a lightweight economic eligibility condition without requiring funds to be locked in a staking contract. VRF eligibility reduces the number of accounts that perform ECCPoW in each block; the final block-winning step remains a computational race among eligible accounts. For example, if $T$ is set to roughly one percent of the eligible account count, the expected active mining population is reduced by two orders of magnitude.
+VCT 프로토콜은 다른 위치를 점한다. 스테이킹 컨트랙트나 검증자 레지스트리를 도입하지 않고, 부모 상태의 계정 잔액만을 자격 기준으로 사용한다. VRF 자격 임계값 $p$가 각 블록에서 ECCPoW를 수행하는 계정 수를 제어하며, 최종 블록 경쟁은 여전히 자격을 갖춘 계정들 간의 ECCPoW 연산 경쟁으로 결정된다. $p$는 등록 계정 수가 아니라 실제 블록 생성 속도에 따라 Bitcoin의 난이도 조정과 유사한 방식으로 조정된다.
 
-Unlike a fixed-deposit staking design, the balance-gated design does not require accounts to lock funds in a native validator registry. Eligibility is determined from the account balance at the epoch snapshot. There is no committee, no Byzantine agreement protocol, and no voting round. The system maintains the simplicity of Bitcoin while reducing the active mining population by the factor $p$ and introducing a balance-threshold eligibility condition.
+위원회도, 비잔틴 합의 프로토콜도, 투표 라운드도 없다. 시스템은 Bitcoin의 단순성을 유지하면서 활성 채굴 참여자 수를 줄이고 잔액 임계값 자격 조건을 도입한다.
 
-## Specification
+## 명세
 
-### System Model
+### 시스템 모델
 
-Let $\mathcal{A}$ denote the set of VRF-registered accounts. Each account $i \in \mathcal{A}$ is controlled by an operator who maintains a long-term VRF key pair $(sk_i^{\mathsf{vrf}}, pk_i^{\mathsf{vrf}})$ and a standard account signing key for the account address $a_i$. The operator binds $pk_i^{\mathsf{vrf}}$ to $a_i$ through a VRF-key registration transaction. Registration does not lock funds.
+$a_i$를 WorldLand 계정 주소, $PK_i$를 그 secp256k1 공개 키라 하면 $a_i = \mathrm{Address}(PK_i)$이다. 계정은 부모 상태에서 다음 조건을 만족할 때 블록 높이 $h$에 대해 자격을 갖춘다:
 
-At each epoch boundary, the protocol checks whether each registered account satisfies the balance threshold:
+$$\mathrm{Balance}_{h-1}(a_i) \geq S_0$$
 
-$$\mathcal{A}_e = \left\{ a_i \in \mathcal{A} : \mathrm{Balance}_e(a_i) \geq S_0 \right\}$$
+자격 조건은 블록 검증 시 부모 상태에서 직접 확인된다.
 
-where $\mathrm{Balance}_e(a_i)$ is the account balance at the epoch snapshot. The set $\mathcal{A}_e$ forms the active eligibility set for epoch $e$.
+각 잔액 조건을 충족한 계정은 블록당 하나의 VRF 자격 기회를 받는다. 동일 계정에 $S_0$ 이상을 보유해도 자격 확률이 증가하지 않는다. 여러 자격 기회를 원하는 참여자는 각각 잔액 임계값을 충족하는 여러 계정을 유지해야 한다.
 
-Each balance-qualified account receives exactly one VRF eligibility trial per block during the epoch. Holding more than $S_0$ in the same account does not increase its eligibility probability. A participant who wants multiple eligibility trials must maintain multiple VRF-registered accounts, each with balance at least $S_0$ at the epoch snapshot.
+계정의 secp256k1 키 쌍 $(sk_i, PK_i)$이 VRF 키로도 사용되어, 별도의 VRF 키 등록 없이 계정 식별과 VRF 자격 증명이 통합된다.
 
-The protocol maintains a network-tunable parameter $p_e \in (0, 1)$, computed at each epoch boundary from $|\mathcal{A}_e|$ and fixed for the duration of that epoch.
+### ECVRF 구조
 
-### Verifiable Coin Toss Function
+VCT는 RFC 9381에서 정의된 타원 곡선 기반 검증 가능 난수 함수(Elliptic Curve Verifiable Random Function, ECVRF)를 사용한다. ECVRF는 ECDSA 서명 알고리즘과는 별개의 암호 구조로, Schnorr 방식의 비대화형 영지식 증명을 기반으로 한다.
 
-Let $\mathsf{phash}_{h-1}$ denote the block hash of the parent block at height $h-1$. For each account $a_i \in \mathcal{A}_e$, the operator computes:
+비밀 키 $sk_i$와 메시지 $m$이 주어졌을 때, ECVRF.Prove는 먼저 메시지를 타원 곡선 점으로 해시한 뒤 비밀 키를 곱하여 VRF 점을 생성한다:
 
-$$(y_i, \pi_i) \leftarrow \mathrm{VRF}(sk_i^{\mathsf{vrf}},\, \mathsf{phash}_{h-1} \| h)$$
+$$\Gamma_i = sk_i \cdot H_{\text{curve}}(m)$$
 
-Account $a_i$ is VRF-eligible for height $h$ if:
+여기서 $H_{\text{curve}}$는 메시지를 secp256k1 곡선 위의 점으로 해시하는 함수(hash-to-curve)이다. VRF 출력 $y_i$는 이 점의 해시값이다:
 
-$$\frac{y_i}{2^{|y|}} < p_e$$
+$$y_i = \mathrm{Hash}(\Gamma_i)$$
 
-The construction has three essential properties:
+VRF 증명 $\pi_i = (c, s)$는 Schnorr 방식의 비대화형 증명으로, $\Gamma_i$가 비밀 키 $sk_i$에 의해 정직하게 생성되었음을 보증한다. 검증자는 $(PK_i,\, m,\, y_i,\, \pi_i)$가 주어지면 $sk_i$를 공개하지 않고도 다음 세 성질을 확인할 수 있다:
 
-1. **Locality.** The VRF is computable by the operator of account $a_i$ alone, requiring only $sk_i^{\mathsf{vrf}}$ and the public $\mathsf{phash}_{h-1}$. No interaction with other nodes is needed.
-2. **Pseudorandomness.** To any party not knowing $sk_i^{\mathsf{vrf}}$, the VRF output is computationally indistinguishable from random before the proof is revealed. The input $\mathsf{phash}_{h-1} \| h$ binds eligibility to the current chain state and limits the freedom to choose a favorable VRF input, although block-header grinding remains a protocol-level risk and must be further limited by the header format and fork-choice rule.
-3. **Verifiability.** The accompanying VRF proof $\pi_i$ allows any validating node, given $pk_i^{\mathsf{vrf}}$ and $\mathsf{phash}_{h-1}$, to verify that the eligibility claim was generated honestly without revealing $sk_i^{\mathsf{vrf}}$.
+1. **유일성(Uniqueness):** $(sk_i, m)$ 쌍에 대해 유효한 VRF 출력은 정확히 하나 존재한다. 동일한 입력에 대해 서로 다른 $y_i$를 주장하는 것은 ECDLP를 푸는 것과 동등하다.
+2. **의사난수성(Pseudorandomness):** $sk_i$를 모르는 당사자에게 $y_i$는 증명 $\pi_i$가 공개되기 전까지 계산적으로 균등한 난수와 구분할 수 없다.
+3. **검증 가능성(Verifiability):** $PK_i$가 있는 누구나 $\pi_i$로부터 $y_i$가 $sk_i$에 의해 정직하게 생성되었음을 검증할 수 있다.
 
-### Block Production and Validation
+ECVRF 증명 $\pi_i$는 Schnorr 방식의 구조체이며, ECDSA 서명 $(r, s)$와는 다른 형태이다. ECDSA의 결정론적 nonce(RFC 6979)는 ECDSA 서명의 재현성을 보장하는 기법이지만 VRF를 구성하지 않는다. ECVRF는 독립적인 VRF 구조로, 동일한 secp256k1 키 쌍을 사용하되 별개의 알고리즘 구조를 따른다.
 
-The operator controlling validator account $a_i$ executes the following mining loop:
+VCT에서는 계정의 기존 secp256k1 키 쌍 $(sk_i, PK_i)$을 그대로 ECVRF 키로 사용한다. 별도의 VRF 전용 키 등록 없이 계정 식별과 VRF 자격 증명이 통합된다.
+
+### Verifiable Coin Toss 함수
+
+$\mathsf{phash}_{h-1}$을 높이 $h-1$의 부모 블록 해시라 하자. 높이 $h$에서 계정 $a_i$는 다음을 계산한다:
+
+$$(y_i, \pi_i) \leftarrow \mathrm{ECVRF.Prove}\!\left(sk_i,\; \texttt{VCT\_VRF} \| \texttt{chainId} \| \mathsf{phash}_{h-1} \| h\right)$$
+
+다음 조건을 만족하면 계정 $a_i$는 높이 $h$에 대해 VRF 자격을 얻는다:
+
+$$\frac{y_i}{2^{|y|}} < p_h$$
+
+이 구조는 세 가지 핵심 특성을 가진다:
+
+1. **지역성(Locality).** VRF는 $sk_i$와 공개된 $\mathsf{phash}_{h-1}$만으로 계정 $a_i$의 운영자 혼자 계산할 수 있다. 다른 노드와의 통신이 필요하지 않다.
+2. **의사난수성(Pseudorandomness).** $sk_i$를 모르는 당사자에게 VRF 출력은 증명이 공개되기 전까지 난수와 계산적으로 구분할 수 없다. 입력에 $\mathsf{phash}_{h-1} \| h$를 포함함으로써 자격이 현재 체인 상태에 바인딩되고 유리한 입력을 자유롭게 선택하는 것이 제한된다. 단, 블록 헤더 그라인딩은 여전히 프로토콜 수준의 위험으로 남는다.
+3. **검증 가능성(Verifiability).** VRF 증명 $\pi_i$는 $PK_i$와 $\mathsf{phash}_{h-1}$이 주어진 모든 검증 노드가 $sk_i$를 공개하지 않고도 자격 주장이 정직하게 생성되었음을 검증할 수 있게 한다.
+
+### 블록 생성 및 검증
+
+계정 $a_i$의 운영자는 다음 채굴 루프를 실행한다:
 
 ```
 1. Select the current canonical parent block at height h-1; let phash_{h-1} be its hash
-2. Check that a_i ∈ A_e and Balance(a_i) ≥ S_0 in the parent state
-3. (y_i, π_i) ← VRF(sk_i^vrf, phash_{h-1} ∥ h)
-4. if y_i / 2^|y| < p_e then              ▷ heads: a_i is VRF-eligible
+2. Check that Balance_{h-1}(a_i) ≥ S_0
+3. (y_i, π_i) ← ECVRF.Prove(sk_i, VCT_VRF ∥ chainId ∥ phash_{h-1} ∥ h)
+4. if y_i / 2^|y| < p_h then              ▷ heads: a_i is VRF-eligible
 5.     Begin ECCPoW search over account-bound challenge:
-           input = (phash_{h-1}, h, a_i, pk_i^vrf, y_i, π_i)
+           input = (phash_{h-1}, h, a_i, PK_i, y_i, π_i)
 6.     if nonce ν found such that ECCPoW(input, ν, T_h) = valid then
-7.         σ_i ← Sign_{a_i}(VCT_BLOCK ∥ chainId ∥ h ∥ phash_{h-1}
-                             ∥ a_i ∥ pk_i^vrf ∥ y_i ∥ π_i ∥ ν ∥ txRoot)
-8.         Construct block h with fields (ν, a_i, pk_i^vrf, y_i, π_i, σ_i)
+7.         σ_i ← Sign_{sk_i}(VCT_BLOCK ∥ chainId ∥ h ∥ phash_{h-1}
+                              ∥ a_i ∥ PK_i ∥ y_i ∥ π_i ∥ ν ∥ txRoot)
+8.         Construct block h with fields (ν, a_i, PK_i, y_i, π_i, σ_i)
 9.         Broadcast block h
 10.    end if
 11. else                                   ▷ tails: skip this block
@@ -93,86 +114,97 @@ The operator controlling validator account $a_i$ executes the following mining l
 13. end if
 ```
 
-The nonce $\nu$ is included in the signed message so that a copied VRF eligibility proof cannot be reused by another miner to produce a valid block without access to the account signing key of $a_i$.
+nonce $\nu$를 서명 메시지에 포함함으로써, 복사된 VRF 자격 증명만으로는 $a_i$의 계정 개인 키에 접근하지 않고 유효한 블록을 생성할 수 없다.
 
-The value of $p_e$ is taken from the epoch snapshot and is fixed for all blocks in epoch $e$. All nodes apply the same deterministic value of $p_e$ when validating eligibility.
+수신 노드는 높이 $h$의 후보 블록을 다음 순서로 검증한다:
+```
+1. $\mathrm{Address}(PK_i) = a_i$
+2. $\mathrm{Balance}_{h-1}(a_i) \geq S_0$
+3. $\mathrm{ECVRF.Verify}\!\left(PK_i,\; \texttt{VCT\_VRF} \| \texttt{chainId} \| \mathsf{phash}_{h-1} \| h,\; y_i,\; \pi_i\right) = 1$
+4. $y_i / 2^{|y|} < p_h$
+5. $\mathrm{ECCPoW}\!\left(\nu,\; \mathsf{phash}_{h-1} \| h \| a_i \| PK_i \| y_i \| \pi_i,\; T_h\right) = \mathrm{valid}$
+6. $\sigma_i$가 $sk_i$에 대응하는 $a_i$ 하에서 $\nu$를 포함한 블록 커밋먼트에 대해 유효함
+```
+포크 선택은 누적 체인 작업량 기준 Nakamoto 최장 체인 규칙을 따른다. 블록 $B_h$의 작업량은 $W(B_h) = 1/T_h$이며, 체인 점수는 $W(\text{chain}) = \sum_h W(B_h)$이다. 위 6가지 검증 조건 중 하나라도 실패한 블록은 작업량에 기여하지 않는다. 자격 임계값 $p_h$는 채굴 참여 자격을 제어하는 역할을 하며, 체인 작업량 계산에는 포함되지 않는다.
 
-A receiving node validates a candidate block at height $h$ by checking, in order:
-1. Account $a_i$ is included in the epoch eligibility snapshot $\mathcal{A}_e$
-2. Account $a_i$ has balance $\geq S_0$ in the parent state of the candidate block
-3. $pk_i^{\mathsf{vrf}}$ is bound to $a_i$ in the VRF-key registry
-4. $\mathrm{VerifyVRF}(pk_i^{\mathsf{vrf}},\, \mathsf{phash}_{h-1} \| h,\, y_i,\, \pi_i) = 1$
-5. $y_i / 2^{|y|} < p_e$
-6. The ECCPoW solution $\nu$ is valid for the account-bound challenge $(\mathsf{phash}_{h-1},\, h,\, a_i,\, pk_i^{\mathsf{vrf}},\, y_i,\, \pi_i)$ at difficulty $T_h$
-7. The account signature $\sigma_i$ is valid under $a_i$ over the block commitment including $\nu$
+### p 조정
 
-Fork choice follows the heaviest-valid-ECCPoW-chain rule, where a block contributes work only if all seven validation conditions above are satisfied.
+$p$는 등록 계정 수에서 계산하지 않고, Bitcoin의 난이도 조정과 유사하게 실제 블록 생성 속도를 기반으로 조정된다.
 
-### Dynamic p Adjustment
+$$p_{e+1} = \mathrm{clip}\!\left(p_e \cdot \frac{\Delta_{\mathrm{observed}}}{\Delta_{\mathrm{target}}},\; \frac{p_e}{r},\; p_e \cdot r\right)$$
 
-At each epoch boundary, the protocol computes the active eligibility set $\mathcal{A}_e$ from the epoch balance snapshot and sets:
+여기서:
 
-$$p_e \leftarrow \min\!\left(1,\, \frac{T}{|\mathcal{A}_e|}\right)$$
+- $\Delta_{\mathrm{target}}$: 목표 블록 생성 간격
+- $\Delta_{\mathrm{observed}}$: 직전 에포크에서 관측된 실제 평균 블록 생성 간격
+- $r$: 한 에포크에서 $p$의 최대 변화 배율 (예: $r = 4$)
 
-The set $\mathcal{A}_e$ and the value $p_e$ remain fixed throughout epoch $e$. Accounts that newly satisfy the balance threshold during an epoch are included in $\mathcal{A}_e$ only at the next epoch boundary. Accounts whose balance falls below $S_0$ after the snapshot remain eligible for the current epoch under the snapshot rule; immediate-disqualification rules are left for future consideration.
+블록이 너무 자주 생성되면 $p$를 낮춰 참여자 수를 줄이고, 너무 느리게 생성되면 $p$를 높여 더 많은 계정이 ECCPoW를 시도하게 한다. 이 조정은 잔액 조건을 충족한 총 계정 수 $N$을 명시적으로 세지 않아도 작동한다.
 
-Since $p_e$ is chosen so that $\mathbb{E}[X] = p_e |\mathcal{A}_e| = T$, the probability that no account is eligible in a given block is:
+## 보안 분석
 
-$$\Pr[X = 0] = (1 - p_e)^{|\mathcal{A}_e|} \approx e^{-T}$$
+### Sybil 비용
 
-For target values such as $T \in [10^2, 10^3]$, this probability is negligible.
+$S_0$는 계정당 자격 임계값이면서 동시에 Sybil 공격의 단위 비용(Sybil cost parameter)이다. 총 잔액 $B_A$를 보유한 공격자가 생성할 수 있는 최대 자격 계정 수는:
 
-The use of $|\mathcal{A}_e|$ assumes that balance-qualified accounts are economically motivated to remain online and exploit their eligibility. If many eligible accounts are offline or intentionally inactive, the effective number of active mining participants may fall below $T$. The protocol may therefore require reward rules that discourage idle eligible accounts.
+$$N_A = \left\lfloor \frac{B_A}{S_0} \right\rfloor$$
 
-## Security Analysis
+$S_0$를 높이면 공격자당 최대 계정 수가 줄어들고, Sybil 공격의 자본 비용이 계정 수에 선형으로 증가한다. 반대로 $S_0$를 낮추면 소액 보유자의 참여가 허용되지만 Sybil 공격 비용이 낮아진다. 프로토콜 설계자는 이 트레이드오프를 감안하여 $S_0$를 결정해야 한다.
 
-Let $N_H$ and $N_A$ denote the number of active balance-qualified accounts controlled by the honest network and the adversary, respectively, in the epoch snapshot $\mathcal{A}_e$. Each active account has balance at least $S_0$, has a registered VRF public key, and receives one VRF eligibility trial per block with probability $p_e$.
+### ECCPoW 보안
 
-At block height $h$, the number of eligible honest and adversarial accounts is:
+$N_H$와 $N_A$를 각각 정직한 네트워크와 공격자가 제어하며 실제로 채굴을 시도하는 잔액 조건 충족 계정 수라 하자. 각 계정은 확률 $p_h$로 블록당 하나의 VRF 자격 기회를 받는다.
 
-$$X_H \sim \text{Binomial}(N_H, p_e), \qquad X_A \sim \text{Binomial}(N_A, p_e)$$
+블록 높이 $h$에서 자격을 갖춘 정직한 계정과 공격자 계정 수는 다음과 같다:
 
-Conditioned on $(X_H, X_A) = (x_H, x_A)$, the probability that the adversary wins the ECCPoW race is:
+$$X_H \sim \text{Binomial}(N_H, p_h), \qquad X_A \sim \text{Binomial}(N_A, p_h)$$
+
+$(X_H, X_A) = (x_H, x_A)$로 조건화하면 공격자가 ECCPoW 경쟁에서 이길 확률은:
 
 $$\Pr[A \text{ wins} \mid x_H, x_A] = \frac{h_A x_A}{h_A x_A + h_H x_H}$$
 
-where $h_A$ and $h_H$ denote the effective ECCPoW throughput per eligible adversarial and honest account. For large $N_H$, $N_A$, the binomial distributions concentrate around their means and $p_e$ cancels:
+여기서 $h_A$와 $h_H$는 자격을 갖춘 계정당 유효 ECCPoW 처리량을 나타낸다. $N_H$, $N_A$가 클 때 $p_h$가 소거되어:
 
 $$\Pr[A \text{ wins}] \approx \frac{h_A N_A}{h_A N_A + h_H N_H}$$
 
-Under ECCPoW's ASIC resistance ($h_A \approx h_H$), this simplifies to:
+ECCPoW의 ASIC 저항성 하에서 ($h_A \approx h_H$):
 
 $$\Pr[A \text{ wins}] \approx \frac{N_A}{N_A + N_H}$$
 
-VCT is not stake-proportional. Holding more than $S_0$ in one account does not increase that account's eligibility probability. The block-winning probability is driven by the number of balance-qualified accounts and ECCPoW throughput, not by total balance held in a single account.
-
-A sustained majority attack requires the adversary to dominate the eligible ECCPoW capacity:
+지속적인 다수 공격은 다음 조건을 요구한다:
 
 $$h_A N_A > h_H N_H$$
 
-Registered account count alone is not sufficient for block dominance unless the adversary also has enough ECCPoW throughput to exploit its eligible accounts. Conversely, a hardware advantage increases $h_A$ and lowers the number of balance-qualified accounts required for majority control. If $h_A \approx h_H$, this reduces to $N_A > N_H$. Since each additional adversarial account must maintain balance at least $S_0$, the liquid balance requirement for increasing $N_A$ scales linearly with the number of adversarial accounts.
+계정 수만으로는 부족하며 공격자는 충분한 ECCPoW 처리량도 보유해야 한다.
 
-**Limitations.** The balance-gated design does not provide hardware-level Sybil resistance and does not lock funds. A participant may create multiple eligible accounts by maintaining balance at least $S_0$ in each. VCT should therefore not be interpreted as one-CPU-one-vote consensus. Its Sybil resistance comes from the liquid balance requirement per eligible account, while its energy reduction comes from VRF-gated participation.
+### 부모 해시 그라인딩
 
-The account-level signature prevents unauthorized reuse of a copied VRF eligibility proof, because a valid block must be signed by the balance-qualified account over a commitment that includes the ECCPoW nonce. However, this mechanism does not prevent voluntary delegation: if the account owner shares its private key or provides a remote signing service to another miner, the protocol cannot distinguish this from normal operation.
+현재 블록 생성자는 트랜잭션 선택, 순서 변경, 또는 채굴 타이밍 조작을 통해 서로 다른 $\mathsf{phash}_{h-1}$ 후보를 생성하고, 어느 값이 다음 블록에서 자신의 계정에 유리한 VRF 출력을 만드는지 사전에 확인할 수 있다. 이를 부모 해시 그라인딩이라 한다.
 
-## Implementation
+ECCPoW 챌린지에 계정 바인딩을 도입함으로써 VRF 자격 증명의 전이적 재사용은 방지하였으나, 부모 해시 선택 자체에서 발생하는 그라인딩은 VCT v1에서 완전히 제거되지 않는다. 그라인딩을 통해 공격자가 얻을 수 있는 VRF 자격 편향은 탐색 공간($\mathsf{phash}$ 후보 수)과 $p_h$에 비례하며, $p_h$가 작을수록 편향 효과도 줄어든다. 완전한 해결을 위해서는 VDF(Verifiable Delay Function) 기반 랜덤 비콘과 같은 추가 메커니즘이 필요하며, 이는 향후 WIP에서 다룰 예정이다.
 
-The VCT protocol is to be implemented as a consensus engine within the WorldLand client, an EVM-compatible fork of go-ethereum maintained at https://github.com/cryptoecc/WorldLand.
+### 키 보안
 
-The required changes relative to the current ECCPoW implementation are:
+계정 개인 키 $sk_i$가 ECVRF 계산과 블록 서명 모두에 사용되므로 핫 키 노출 위험이 존재한다. 채굴 노드 운영 시 적절한 키 관리 절차가 필요하다.
 
-1. **VRF key registration** — protocol-level binding between account address $a_i$ and VRF public key $pk_i^{\mathsf{vrf}}$ via a registration transaction
-2. **Epoch balance snapshot** — epoch-wise computation of the active eligibility set $\mathcal{A}_e = \{a_i : \mathrm{Balance}_e(a_i) \geq S_0\}$ and the corresponding $p_e = \min(1,\, T / |\mathcal{A}_e|)$
-3. **VRF integration** — per-block VRF evaluation over $\mathsf{phash}_{h-1} \| h$ and proof generation in the mining loop
-4. **Account-bound ECCPoW challenge** — ECCPoW input includes $\mathsf{phash}_{h-1}$, $h$, account address $a_i$, registered VRF public key, VRF output, and VRF proof
-5. **Block header extension** — additional fields for account address $a_i$, VRF public key $pk_i^{\mathsf{vrf}}$, VRF output $y_i$, VRF proof $\pi_i$, ECCPoW nonce $\nu$, and account signature $\sigma_i$
-6. **Validation logic** — balance-threshold check, VRF-key registry lookup, VRF proof verification, eligibility check, ECCPoW validation, and account signature verification; blocks failing any check do not contribute to chain work
+## 구현
 
-## References
+VCT 프로토콜은 https://github.com/cryptoecc/WorldLand 에서 관리되는 go-ethereum의 EVM 호환 포크인 WorldLand 클라이언트의 합의 엔진으로 구현될 예정이다.
+
+현재 ECCPoW 구현 대비 필요한 변경 사항은 다음과 같다:
+
+1. **잔액 자격 확인** — 블록 검증 시 부모 상태에서 $\mathrm{Balance}_{h-1}(a_i) \geq S_0$ 직접 확인; 별도 레지스트리 불필요
+2. **secp256k1-VRF 통합** — 계정 개인 키를 사용하는 ECVRF 구현; 채굴 루프에서 $\texttt{VCT\_VRF} \| \texttt{chainId} \| \mathsf{phash}_{h-1} \| h$에 대한 블록당 VRF 평가 및 증명 생성
+3. **계정 바인딩 ECCPoW 챌린지** — ECCPoW 입력에 $\mathsf{phash}_{h-1}$, $h$, 계정 주소 $a_i$, 공개 키 $PK_i$, VRF 출력 $y_i$, VRF 증명 $\pi_i$ 포함
+4. **블록 헤더 확장** — 계정 주소 $a_i$, 공개 키 $PK_i$, VRF 출력 $y_i$, VRF 증명 $\pi_i$, ECCPoW nonce $\nu$, 계정 서명 $\sigma_i$를 위한 추가 필드
+5. **검증 로직** — 잔액 확인, 공개 키-주소 검증, VRF 증명 검증, 자격 임계값 확인, 계정 바인딩 ECCPoW 검증, 계정 서명 검증의 6단계 순차 확인; 검증 실패 블록은 체인 작업량에 기여하지 않음
+6. **p 조정** — 에포크 단위로 관측된 블록 생성 간격 기반 $p$ 업데이트
+
+## 참고문헌
 
 [1] S. Nakamoto, "Bitcoin: A Peer-to-Peer Electronic Cash System," 2008.  
 [2] H. Park, S. Kim, and H.-N. Lee, "Time-Varying LDPC Code-Based Proof-of-Work for Cryptocurrency Mining," Symmetry, vol. 12, no. 6, 2020.  
 [3] H.-N. Lee et al., "Error Correction Code Verifiable Computation Consensus," IEEE, doc. 11048962, 2025.  
 [4] S. Micali, M. Rabin, and S. Vadhan, "Verifiable Random Functions," in Proc. FOCS, 1999.  
 [5] J. Chen and S. Micali, "Algorand: A Secure and Efficient Distributed Ledger," Theor. Comput. Sci., vol. 777, pp. 155–183, 2019.  
+[6] D. Papadopoulos et al., "Making NSEC5 Practical for DNSSEC," 2017; IETF RFC 9381, "Verifiable Random Functions (VRFs)," 2023.  
