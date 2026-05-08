@@ -60,7 +60,7 @@ $$\mathrm{Balance}_{h-1}(a_i) \geq S_0$$
 
 ### ECVRF 구조
 
-VCT는 RFC 9381에서 정의된 타원 곡선 기반 검증 가능 난수 함수(Elliptic Curve Verifiable Random Function, ECVRF)를 사용한다. ECVRF는 ECDSA 서명 알고리즘과는 별개의 암호 구조로, Schnorr 방식의 비대화형 영지식 증명을 기반으로 한다.
+VCT는 RFC 9381의 ECVRF 구조를 따르는 secp256k1 기반 ECVRF instantiation을 사용한다. ECVRF는 ECDSA 서명 알고리즘과는 별개의 암호 구조로, Schnorr 방식의 비대화형 영지식 증명을 기반으로 한다. 단, RFC 9381의 표준 ciphersuite는 P-256 및 ED25519 곡선만을 정의하며 secp256k1은 포함되어 있지 않다. 따라서 VCT는 RFC 9381의 구조적 틀을 따르되, hash-to-curve, point encoding, challenge generation, nonce derivation, proof-to-hash 절차를 WorldLand 전용 ciphersuite로 명시해야 한다. 이 ciphersuite를 합의 규칙으로 고정하지 않으면 서로 다른 클라이언트가 동일 입력에 대해 서로 다른 VRF 출력을 생성하여 합의를 위반할 수 있다.
 
 비밀 키 $sk_i$와 메시지 $m$이 주어졌을 때, ECVRF.Prove는 먼저 메시지를 타원 곡선 점으로 해시한 뒤 비밀 키를 곱하여 VRF 점을 생성한다:
 
@@ -78,7 +78,7 @@ VRF 증명 $\pi_i = (c, s)$는 Schnorr 방식의 비대화형 증명으로, $\Ga
 
 ECVRF 증명 $\pi_i$는 Schnorr 방식의 구조체이며, ECDSA 서명 $(r, s)$와는 다른 형태이다. ECDSA의 결정론적 nonce(RFC 6979)는 ECDSA 서명의 재현성을 보장하는 기법이지만 VRF를 구성하지 않는다. ECVRF는 독립적인 VRF 구조로, 동일한 secp256k1 키 쌍을 사용하되 별개의 알고리즘 구조를 따른다.
 
-**Ethereum 계정 인프라와의 관계.** WorldLand는 EVM 호환 체인이므로 계정 모델은 Ethereum의 외부 소유 계정(EOA) 구조를 따른다. Ethereum 계정은 secp256k1 개인 키로 트랜잭션과 메시지를 서명하며, 검증자는 서명으로부터 공개 키 또는 주소를 복원하여 계정 소유자의 승인을 확인한다. go-ethereum이 사용하는 secp256k1 라이브러리는 이미 RFC 6979 기반 결정론적 nonce 생성을 기본 서명 방식으로 지원하므로, 계정 인증과 결정론적 서명 인프라는 기존에 갖추어져 있다.
+**Ethereum 계정 인프라와의 관계.** WorldLand는 EVM 호환 체인이므로 계정 모델은 Ethereum의 외부 소유 계정(EOA) 구조를 따른다. Ethereum 계정은 secp256k1 개인 키로 트랜잭션과 메시지를 서명하며, 검증자는 서명으로부터 공개 키 또는 주소를 복원하여 계정 소유자의 승인을 확인한다. go-ethereum에 포함된 secp256k1 라이브러리는 ECDSA signing/verification과 RFC 6979 기반 nonce generation을 지원한다 [9]. 이는 Ethereum 계정 생태계가 이미 secp256k1 기반 계정 인증과 결정론적 서명 구현 경험을 갖고 있음을 의미한다.
 
 그러나 RFC 6979 기반 ECDSA는 그 자체로 VRF가 아니다. 정직한 서명자가 동일한 개인 키와 메시지에 대해 재현 가능한 서명을 생성할 수 있더라도, 검증자가 서명자가 올바른 절차를 따랐는지 공개적으로 증명받는 구조가 없다. 즉, VRF가 요구하는 공개 검증 가능한 유일성과 의사난수성은 ECDSA만으로는 보장되지 않는다.
 
@@ -112,8 +112,11 @@ $$\frac{y_i}{2^{|y|}} < p_h$$
 5.     Begin ECCPoW search over account-bound challenge:
            input = (phash_{h-1}, h, a_i, PK_i, y_i, π_i)
 6.     if nonce ν found such that ECCPoW(input, ν, T_h) = valid then
-7.         σ_i ← Sign_{sk_i}(VCT_BLOCK ∥ chainId ∥ h ∥ phash_{h-1}
-                              ∥ a_i ∥ PK_i ∥ y_i ∥ π_i ∥ ν ∥ txRoot)
+7.         σ_i ← Sign_{sk_i}(VCT_BLOCK ∥ chainId
+                              ∥ h ∥ phash_{h-1} ∥ timestamp
+                              ∥ stateRoot ∥ txRoot ∥ receiptRoot
+                              ∥ gasLimit ∥ gasUsed
+                              ∥ a_i ∥ PK_i ∥ y_i ∥ π_i ∥ ν)
 8.         Construct block h with fields (ν, a_i, PK_i, y_i, π_i, σ_i)
 9.         Broadcast block h
 10.    end if
@@ -122,20 +125,23 @@ $$\frac{y_i}{2^{|y|}} < p_h$$
 13. end if
 ```
 
-**계정 서명의 역할.** 계정 서명 $\sigma_i$는 VCT 블록 생성 과정에서 단순한 인증 수단을 넘어 핵심 보안 요소다. $\sigma_i$는 ECCPoW 탐색을 완료한 직후, 트랜잭션 루트 $\mathsf{txRoot}$를 포함한 전체 블록 커밋먼트에 대해 계정 개인 키 $sk_i$로 생성된다. 서명 대상에 VRF 출력 $y_i$, VRF 증명 $\pi_i$, ECCPoW nonce $\nu$가 모두 포함되므로, 유효한 블록을 생성하려면 ECCPoW 탐색을 수행한 그 계정의 개인 키로 직접 서명해야 한다.
+**계정 서명의 역할.** 계정 서명 $\sigma_i$는 VCT 블록 생성 과정에서 단순한 인증 수단을 넘어 핵심 보안 요소다. $\sigma_i$는 ECCPoW 탐색을 완료한 직후, 블록 높이·부모 해시·상태 루트·트랜잭션 루트·영수증 루트·가스 필드·타임스탬프·VRF 출력·VRF 증명·ECCPoW nonce를 포함한 전체 블록 헤더 커밋먼트에 대해 계정 개인 키 $sk_i$로 생성된다. 이로써 유효한 블록을 생성하려면 ECCPoW 탐색을 수행한 그 계정의 개인 키로 직접 서명해야 한다.
 
-이 설계는 두 가지 공격을 차단한다. 첫째, 네트워크에 전파 중인 VRF 자격 증명 $(y_i, \pi_i)$을 가로채 다른 트랜잭션 집합을 담은 블록을 조립하는 트랜잭션 치환 공격을 막는다. $\sigma_i$는 $\mathsf{txRoot}$에 바인딩되어 있으므로 트랜잭션 집합을 변경하면 서명 검증이 실패한다. 둘째, 탈취한 VRF 자격 증명과 유효한 ECCPoW nonce $\nu$만으로 블록을 위조하는 자격 증명 재사용 공격을 막는다. $sk_i$에 대한 접근 없이는 올바른 $\sigma_i$를 생성할 수 없다.
+이 설계는 두 가지 공격을 차단한다. 첫째, 후보 블록 또는 부분적으로 전파된 블록 생성 정보를 복사하더라도, 공격자는 원 계정의 개인 키 없이 다른 블록 커밋먼트에 대한 유효한 $\sigma_i$를 생성할 수 없다. 둘째, 탈취한 VRF 자격 증명과 유효한 ECCPoW nonce $\nu$만으로 블록을 위조하는 자격 증명 재사용 공격을 막는다. $sk_i$에 대한 접근 없이는 올바른 $\sigma_i$를 생성할 수 없다.
 
 결과적으로 VCT의 작업증명 과정은 ECCPoW 연산 완료 후 해당 계정의 개인 키 서명까지 포함해야 비로소 유효한 블록이 완성된다. ECCPoW가 연산 비용을 통해 자격을 증명한다면, $\sigma_i$는 블록 내용 전체에 대한 계정 소유권을 최종 확정한다.
 
 수신 노드는 높이 $h$의 후보 블록을 다음 순서로 검증한다:
 ```
-1. $\mathrm{Address}(PK_i) = a_i$
-2. $\mathrm{Balance}_{h-1}(a_i) \geq S_0$
-3. $\mathrm{ECVRF.Verify}\!\left(PK_i,\; \texttt{VCT\_VRF} \| \texttt{chainId} \| \mathsf{phash}_{h-1} \| h,\; y_i,\; \pi_i\right) = 1$
-4. $y_i / 2^{|y|} < p_h$
-5. $\mathrm{ECCPoW}\!\left(\nu,\; \mathsf{phash}_{h-1} \| h \| a_i \| PK_i \| y_i \| \pi_i,\; T_h\right) = \mathrm{valid}$
-6. $\sigma_i$가 $sk_i$에 대응하는 $a_i$ 하에서 $\nu$를 포함한 블록 커밋먼트에 대해 유효함
+1. Address(PK_i) = a_i
+2. Balance_{h-1}(a_i) ≥ S_0
+3. (y_i', valid) ← ECVRF.VerifyAndHash(PK_i,
+       VCT_VRF ∥ chainId ∥ phash_{h-1} ∥ h, π_i)
+4. Require valid = 1  ▷ π_i가 PK_i와 메시지에 대해 유효한 증명인지 확인
+5. Require y_i' = y_i  ▷ 블록에 기재된 y_i가 π_i로부터 재계산된 값과 일치하는지 확인
+6. Require y_i' / 2^|y| < p_h  ▷ VRF 자격 임계값 통과 여부
+7. ECCPoW(ν, phash_{h-1} ∥ h ∥ a_i ∥ PK_i ∥ y_i ∥ π_i, T_h) = valid
+8. σ_i가 a_i의 sk_i 하에서 전체 블록 헤더 커밋먼트에 대해 유효함
 ```
 포크 선택은 누적 체인 작업량 기준 Nakamoto 최장 체인 규칙을 따른다. 블록 $B_h$의 작업량은 $W(B_h) = 1/T_h$이며, 체인 점수는 $W(\text{chain}) = \sum_h W(B_h)$이다. 위 6가지 검증 조건 중 하나라도 실패한 블록은 작업량에 기여하지 않는다. 자격 임계값 $p_h$는 채굴 참여 자격을 제어하는 역할을 하며, 체인 작업량 계산에는 포함되지 않는다.
 
@@ -193,7 +199,11 @@ $$h_A N_A > h_H N_H$$
 
 현재 블록 생성자는 트랜잭션 선택, 순서 변경, 또는 채굴 타이밍 조작을 통해 서로 다른 $\mathsf{phash}_{h-1}$ 후보를 생성하고, 어느 값이 다음 블록에서 자신의 계정에 유리한 VRF 출력을 만드는지 사전에 확인할 수 있다. 이를 부모 해시 그라인딩이라 한다.
 
-ECCPoW 챌린지에 계정 바인딩을 도입함으로써 VRF 자격 증명의 전이적 재사용은 방지하였으나, 부모 해시 선택 자체에서 발생하는 그라인딩은 VCT v1에서 완전히 제거되지 않는다. 그라인딩을 통해 공격자가 얻을 수 있는 VRF 자격 편향은 탐색 공간($\mathsf{phash}$ 후보 수)과 $p_h$에 비례하며, $p_h$가 작을수록 편향 효과도 줄어든다. 완전한 해결을 위해서는 VDF(Verifiable Delay Function) 기반 랜덤 비콘과 같은 추가 메커니즘이 필요하며, 이는 향후 WIP에서 다룰 예정이다.
+ECCPoW 챌린지에 계정 바인딩을 도입함으로써 VRF 자격 증명의 전이적 재사용은 방지하였으나, 부모 해시 선택 자체에서 발생하는 그라인딩은 VCT v1에서 완전히 제거되지 않는다. 공격자가 $G$개의 부모 해시 후보를 탐색할 수 있다면, 특정 공격자 계정이 다음 높이에서 적어도 한 번 VRF 자격을 얻을 확률은:
+
+$$1 - (1-p_h)^G$$
+
+로 증가한다. 따라서 그라인딩 편향은 $p_h$만이 아니라 블록 생성자가 조작 가능한 헤더 필드, 트랜잭션 순서, 타임스탬프 선택 공간($G$)에 의해 결정된다. 완전한 해결을 위해서는 VDF(Verifiable Delay Function) 기반 랜덤 비콘과 같은 추가 메커니즘이 필요하며, 이는 향후 WIP에서 다룰 예정이다.
 
 ### 키 보안
 
@@ -205,12 +215,13 @@ VCT 프로토콜은 https://github.com/cryptoecc/WorldLand 에서 관리되는 g
 
 현재 ECCPoW 구현 대비 필요한 변경 사항은 다음과 같다:
 
-1. **잔액 자격 확인** — 블록 검증 시 부모 상태에서 $\mathrm{Balance}_{h-1}(a_i) \geq S_0$ 직접 확인; 별도 레지스트리 불필요
-2. **secp256k1-VRF 통합** — 계정 개인 키를 사용하는 ECVRF 구현; 채굴 루프에서 $\texttt{VCT\_VRF} \| \texttt{chainId} \| \mathsf{phash}_{h-1} \| h$에 대한 블록당 VRF 평가 및 증명 생성
-3. **계정 바인딩 ECCPoW 챌린지** — ECCPoW 입력에 $\mathsf{phash}_{h-1}$, $h$, 계정 주소 $a_i$, 공개 키 $PK_i$, VRF 출력 $y_i$, VRF 증명 $\pi_i$ 포함
-4. **블록 헤더 확장** — 계정 주소 $a_i$, 공개 키 $PK_i$, VRF 출력 $y_i$, VRF 증명 $\pi_i$, ECCPoW nonce $\nu$, 계정 서명 $\sigma_i$를 위한 추가 필드
-5. **검증 로직** — 잔액 확인, 공개 키-주소 검증, VRF 증명 검증, 자격 임계값 확인, 계정 바인딩 ECCPoW 검증, 계정 서명 검증의 6단계 순차 확인; 검증 실패 블록은 체인 작업량에 기여하지 않음
-6. **p 조정** — 에포크 단위로 관측된 블록 생성 간격 기반 $p$ 업데이트
+1. **secp256k1 ECVRF ciphersuite 정의** — hash-to-curve 방식, point encoding, scalar encoding, challenge hash, nonce derivation, proof-to-hash, public-key validation 절차를 합의 규칙으로 고정; 클라이언트 간 VRF 출력 불일치 방지
+2. **잔액 자격 확인** — 블록 검증 시 부모 상태에서 $\mathrm{Balance}_{h-1}(a_i) \geq S_0$ 직접 확인; 별도 레지스트리 불필요
+3. **secp256k1-VRF 통합** — 계정 개인 키를 사용하는 ECVRF 구현; 채굴 루프에서 $\texttt{VCT\_VRF} \| \texttt{chainId} \| \mathsf{phash}_{h-1} \| h$에 대한 블록당 VRF 평가 및 증명 생성
+4. **계정 바인딩 ECCPoW 챌린지** — ECCPoW 입력에 $\mathsf{phash}_{h-1}$, $h$, 계정 주소 $a_i$, 공개 키 $PK_i$, VRF 출력 $y_i$, VRF 증명 $\pi_i$ 포함
+5. **블록 헤더 확장** — 계정 주소 $a_i$, 공개 키 $PK_i$, VRF 출력 $y_i$, VRF 증명 $\pi_i$, ECCPoW nonce $\nu$, 계정 서명 $\sigma_i$를 위한 추가 필드
+6. **검증 로직** — 잔액 확인, 공개 키-주소 검증, VRF 증명 검증(proof-derived $y_i'$ 재계산 및 블록 기재값과 비교), 자격 임계값 확인, 계정 바인딩 ECCPoW 검증, 전체 헤더 커밋먼트에 대한 계정 서명 검증의 8단계 순차 확인; 검증 실패 블록은 체인 작업량에 기여하지 않음
+7. **p 조정** — 에포크 단위로 관측된 블록 생성 간격 기반 $p$ 업데이트
 
 ## 참고문헌
 
@@ -222,3 +233,4 @@ VCT 프로토콜은 https://github.com/cryptoecc/WorldLand 에서 관리되는 g
 [6] D. Papadopoulos et al., "Making NSEC5 Practical for DNSSEC," 2017; IETF RFC 9381, "Verifiable Random Functions (VRFs)," 2023.  
 [7] S. Kim et al., "VRF-PoW: Proof of Work Consensus With Verifiable Random Function," IEEE Xplore, doc. 11362952.  
 [8] J. R. Douceur, "The Sybil Attack," in Proc. IPTPS, 2002.  
+[9] Ethereum Foundation, go-ethereum crypto/secp256k1 — libsecp256k1 wrapper, https://github.com/ethereum/go-ethereum/tree/master/crypto/secp256k1.  
