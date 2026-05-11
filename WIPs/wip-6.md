@@ -26,7 +26,7 @@
 
 이 문서는 WorldLand 블록체인을 위한 합의 메커니즘인 Verifiable Coin Toss (VCT) 프로토콜을 설명한다. VCT는 잔액 임계값 기반 채굴 자격 조건, secp256k1 기반 VRF 선발, 계정 바인딩 ECCPoW, Nakamoto 방식의 최대 유효 작업량 포크 선택을 결합한다.
 
-각 블록 높이에서, 부모 상태 잔액이 $S_0$ 이상인 계정은 자신의 계정 키를 사용하여 부모 블록 해시와 목표 높이에 대해 secp256k1 기반 VRF를 평가할 수 있다. VRF 출력이 네트워크 자격 임계값 $p$ 미만이면 해당 계정은 ECCPoW를 시도할 자격을 얻는다. 생성된 블록에는 계정 공개 키, VRF 출력, VRF 증명, ECCPoW nonce, 최종 블록 커밋먼트에 대한 계정 서명이 포함되어야 한다.
+각 블록 높이에서, 부모 상태 잔액이 $S_0$ 이상인 계정은 자신의 계정 키를 사용하여 부모 블록 해시와 목표 높이에 대해 secp256k1 기반 VRF를 평가할 수 있다. VRF 출력이 네트워크 자격 임계값 $p$ 미만이면 해당 계정은 ECCPoW를 시도할 자격을 얻는다. 생성된 블록에는 계정 공개 키, VRF 출력, VRF 증명, ECCPoW nonce, 그리고 해당 nonce에 대한 논스별 채굴 서명 $\sigma_\nu$가 포함되어야 한다. $\sigma_\nu$는 ECCPoW 탐색 중 각 nonce 시도마다 계정 개인 키로 생성되며, ECCPoW hash-vector seed에 포함된다. 따라서 공개된 VRF 자격 증명만으로는 제3자가 독립적으로 유효한 ECCPoW 입력을 생성할 수 없다. 단, 계정 소유자가 개인키를 공유하거나 온라인 서명 서비스를 제공하는 경우 위탁 채굴 자체를 암호학적으로 완전히 차단하지는 못한다.
 
 VCT는 검증자 레지스트리나 지분 가중 리더 선출을 도입하지 않는다. 단일 계정에 $S_0$ 이상을 보유해도 해당 계정의 자격 확률은 증가하지 않는다. 여러 자격 시도를 원하는 참여자는 각각 잔액 임계값을 충족하는 여러 계정을 유지해야 한다.
 
@@ -100,6 +100,40 @@ $$\frac{y_i}{2^{|y|}} < p_h$$
 2. **의사난수성(Pseudorandomness).** $sk_i$를 모르는 당사자에게 VRF 출력은 증명이 공개되기 전까지 난수와 계산적으로 구분할 수 없다. 입력에 $\mathsf{phash}_{h-1} \| h$를 포함함으로써 자격이 현재 체인 상태에 바인딩되고 유리한 입력을 자유롭게 선택하는 것이 제한된다. 단, 블록 헤더 그라인딩은 여전히 프로토콜 수준의 위험으로 남는다.
 3. **검증 가능성(Verifiability).** VRF 증명 $\pi_i$는 $PK_i$와 $\mathsf{phash}_{h-1}$이 주어진 모든 검증 노드가 $sk_i$를 공개하지 않고도 자격 주장이 정직하게 생성되었음을 검증할 수 있게 한다.
 
+### 계정 바인딩 ECCPoW 입력
+
+VCT는 WIP-2 ECCPoW의 LDPC decoder, parity-check matrix 생성 방식, codeword 유효성 조건을 변경하지 않는다. 변경되는 부분은 ECCPoW hash vector $r$를 생성하는 입력 seed이다.
+
+WIP-2의 ECCPoW에서는 현재 블록 헤더 $\mathrm{CBH}$와 nonce $\nu$를 사용하여 hash vector를 생성한다:
+
+$$s_1 := \mathrm{Keccak512}(\mathrm{Keccak256}(\mathrm{CBH}) \| \nu).$$
+
+VCT에서는 이 입력을 계정 개인키에 바인딩된 mining seed로 대체한다. 먼저 채굴자는 nonce loop 전에 block template commitment인 $\texttt{sealHash}$를 계산한다:
+
+$$\texttt{sealHash} := \mathrm{Keccak256}\!\left(\texttt{VCT\_SEAL} \| \texttt{chainId} \| \mathrm{RLP}\!\left(\mathsf{phash}_{h-1},\, h,\, a_i,\, PK_i,\, y_i,\, \pi_i,\, \texttt{timestamp},\, \ldots,\, \texttt{CodeLength}\right)\right).$$
+
+여기서 $\nu$, $\sigma_\nu$, $\texttt{Codeword}$는 $\texttt{sealHash}$에서 제외된다. 이 값들은 ECCPoW 탐색 결과로 결정되므로, $\texttt{sealHash}$에 포함하면 순환 의존성이 발생한다.
+
+각 nonce $\nu$에 대해 채굴자는 다음 메시지를 서명한다:
+
+$$m_\nu := \mathrm{Keccak256}(\texttt{VCT\_MINE} \| \texttt{chainId} \| \texttt{sealHash} \| \nu),$$
+
+$$\sigma_\nu := \mathrm{Sign}_{sk_i}(m_\nu).$$
+
+그 다음 ECCPoW hash-vector seed를 다음과 같이 정의한다:
+
+$$\texttt{powSeed}_\nu := \mathrm{Keccak256}(\texttt{VCT\_ECCPOW} \| \texttt{chainId} \| \texttt{sealHash} \| \nu \| \sigma_\nu).$$
+
+ECCPoW hash vector $r$는 $\texttt{powSeed}_\nu$로부터 생성된다:
+
+$$s_1 := \mathrm{Keccak512}(\texttt{powSeed}_\nu).$$
+
+$n > 512$인 경우에는 WIP-2와 동일하게 반복 해싱을 통해 필요한 길이의 hash vector를 생성한다:
+
+$$s_u := \mathrm{Keccak512}(s_{u-1}), \quad u \geq 2.$$
+
+이후 LDPC decoder $D_{\mathrm{mp}}$, parity-check matrix $H$, codeword $c$, 그리고 유효성 조건 $Hc = 0$, $\frac{n}{4} < W(c) < \frac{3n}{4}$는 WIP-2 ECCPoW와 동일하게 유지된다. VCT의 핵심 변경은 ECCPoW 자체를 교체하는 것이 아니라, ECCPoW puzzle input을 계정 개인키 기반 서명값에 바인딩하는 것이다.
+
 ### 블록 생성 및 검증
 
 계정 $a_i$의 운영자는 다음 채굴 루프를 실행한다:
@@ -109,41 +143,55 @@ $$\frac{y_i}{2^{|y|}} < p_h$$
 2. Check that Balance_{h-1}(a_i) ≥ S_0
 3. (y_i, π_i) ← ECVRF.Prove(sk_i, VCT_VRF ∥ chainId ∥ phash_{h-1} ∥ h)
 4. if y_i / 2^|y| < p_h then              ▷ heads: a_i is VRF-eligible
-5.     Begin ECCPoW search over account-bound challenge:
-           input = (phash_{h-1}, h, a_i, PK_i, y_i, π_i)
-6.     if nonce ν found such that ECCPoW(input, ν, T_h) = valid then
-7.         σ_i ← Sign_{sk_i}(VCT_BLOCK ∥ chainId
-                              ∥ h ∥ phash_{h-1} ∥ timestamp
-                              ∥ stateRoot ∥ txRoot ∥ receiptRoot
-                              ∥ gasLimit ∥ gasUsed
-                              ∥ a_i ∥ PK_i ∥ y_i ∥ π_i ∥ ν)
-8.         Construct block h with fields (ν, a_i, PK_i, y_i, π_i, σ_i)
-9.         Broadcast block h
-10.    end if
-11. else                                   ▷ tails: skip this block
-12.    Wait for block h from peers
-13. end if
+5.     sealHash ← Keccak256(VCT_SEAL ∥ chainId ∥ RLP(phash_{h-1}, h, a_i, PK_i,
+                             y_i, π_i, timestamp, stateRoot, txRoot, receiptRoot,
+                             gasLimit, gasUsed, CodeLength))
+       ▷ sealHash excludes ν, σ_ν, Codeword — these are determined by the nonce search
+6.     for each nonce ν = 0, 1, 2, … do
+7.         m_ν ← Keccak256(VCT_MINE ∥ chainId ∥ sealHash ∥ ν)
+8.         σ_ν ← Sign_{sk_i}(m_ν)
+9.         powSeed_ν ← Keccak256(VCT_ECCPOW ∥ chainId ∥ sealHash ∥ ν ∥ σ_ν)
+10.        s_1 ← Keccak512(powSeed_ν)  ▷ ECCPoW hash-vector seed
+11.        Generate hash vector r from s_1 (extend with Keccak512 if n > 512)
+12.        Run LDPC decoder D_mp(r, H) to obtain candidate codeword c
+13.        if Hc = 0 and n/4 < W(c) < 3n/4 then
+14.            Construct block h with (ν, Codeword=c, CodeLength=n, a_i, PK_i, y_i, π_i, σ_ν)
+15.            Broadcast block h; break
+16.        end if
+17.    end for
+18. else                                   ▷ tails: skip this block
+19.    Wait for block h from peers
+20. end if
 ```
 
-**계정 서명의 역할.** 계정 서명 $\sigma_i$는 VCT 블록 생성 과정에서 단순한 인증 수단을 넘어 핵심 보안 요소다. $\sigma_i$는 ECCPoW 탐색을 완료한 직후, 블록 높이·부모 해시·상태 루트·트랜잭션 루트·영수증 루트·가스 필드·타임스탬프·VRF 출력·VRF 증명·ECCPoW nonce를 포함한 전체 블록 헤더 커밋먼트에 대해 계정 개인 키 $sk_i$로 생성된다. 이로써 유효한 블록을 생성하려면 ECCPoW 탐색을 수행한 그 계정의 개인 키로 직접 서명해야 한다.
+**계정 서명의 역할.** 논스별 채굴 서명 $\sigma_\nu$는 ECCPoW nonce 탐색 과정에서 각 ECCPoW trial을 계정 개인 키 $sk_i$에 바인딩하기 위한 서명이다. 채굴자는 각 nonce $\nu$에 대해 $m_\nu := \mathrm{Keccak256}(\texttt{VCT\_MINE} \| \texttt{chainId} \| \texttt{sealHash} \| \nu)$를 계산하고, $\sigma_\nu := \mathrm{Sign}_{sk_i}(m_\nu)$를 생성한 뒤, $\texttt{powSeed}_\nu := \mathrm{Keccak256}(\texttt{VCT\_ECCPOW} \| \texttt{chainId} \| \texttt{sealHash} \| \nu \| \sigma_\nu)$를 사용하여 ECCPoW hash vector $r$를 생성한다.
 
-이 설계는 두 가지 공격을 차단한다. 첫째, 후보 블록 또는 부분적으로 전파된 블록 생성 정보를 복사하더라도, 공격자는 원 계정의 개인 키 없이 다른 블록 커밋먼트에 대한 유효한 $\sigma_i$를 생성할 수 없다. 둘째, 탈취한 VRF 자격 증명과 유효한 ECCPoW nonce $\nu$만으로 블록을 위조하는 자격 증명 재사용 공격을 막는다. $sk_i$에 대한 접근 없이는 올바른 $\sigma_i$를 생성할 수 없다.
-
-결과적으로 VCT의 작업증명 과정은 ECCPoW 연산 완료 후 해당 계정의 개인 키 서명까지 포함해야 비로소 유효한 블록이 완성된다. ECCPoW가 연산 비용을 통해 자격을 증명한다면, $\sigma_i$는 블록 내용 전체에 대한 계정 소유권을 최종 확정한다.
+따라서 공개된 VRF 자격 증명 $(y_i, \pi_i, PK_i)$만으로는 제3자가 유효한 ECCPoW trial을 독립적으로 생성할 수 없다. 각 trial에는 $a_i$의 개인 키로 생성된 유효한 $\sigma_\nu$가 필요하기 때문이다. 단, 이 구조가 모든 형태의 위탁 채굴을 암호학적으로 불가능하게 만드는 것은 아니다. 계정 소유자가 개인키를 공유하거나 온라인 서명 서비스를 제공하면 외부 연산자가 서명된 nonce 후보를 받아 ECCPoW 계산을 수행할 수 있다. VCT의 보안 주장은 "공개된 VRF 자격 증명만으로 수행되는 offline delegated mining을 방지한다"로 제한된다.
 
 수신 노드는 높이 $h$의 후보 블록을 다음 순서로 검증한다:
 ```
-1. Address(PK_i) = a_i
-2. Balance_{h-1}(a_i) ≥ S_0
-3. (y_i', valid) ← ECVRF.VerifyAndHash(PK_i,
-       VCT_VRF ∥ chainId ∥ phash_{h-1} ∥ h, π_i)
-4. Require valid = 1  ▷ π_i가 PK_i와 메시지에 대해 유효한 증명인지 확인
-5. Require y_i' = y_i  ▷ 블록에 기재된 y_i가 π_i로부터 재계산된 값과 일치하는지 확인
-6. Require y_i' / 2^|y| < p_h  ▷ VRF 자격 임계값 통과 여부
-7. ECCPoW(ν, phash_{h-1} ∥ h ∥ a_i ∥ PK_i ∥ y_i ∥ π_i, T_h) = valid
-8. σ_i가 a_i의 sk_i 하에서 전체 블록 헤더 커밋먼트에 대해 유효함
+1.  Address(PK_i) = a_i
+2.  Balance_{h-1}(a_i) ≥ S_0
+3.  (y_i', valid) ← ECVRF.VerifyAndHash(PK_i,
+        VCT_VRF ∥ chainId ∥ phash_{h-1} ∥ h, π_i)
+4.  Require valid = 1  ▷ π_i가 PK_i와 메시지에 대해 유효한 증명인지 확인
+5.  Require y_i' = y_i
+6.  Require y_i' / 2^|y| < p_h
+7.  Recompute sealHash ← Keccak256(VCT_SEAL ∥ chainId ∥ RLP(phash_{h-1}, h, a_i, PK_i,
+                                    y_i, π_i, timestamp, stateRoot, txRoot, receiptRoot,
+                                    gasLimit, gasUsed, CodeLength))
+    ▷ sealHash excludes ν, σ_ν, Codeword
+8.  m_ν ← Keccak256(VCT_MINE ∥ chainId ∥ sealHash ∥ ν)
+9.  Require ECRecover(σ_ν, m_ν) = a_i
+    ▷ σ_ν의 서명자가 블록 coinbase와 일치하는지 확인; valid secp256k1 ECDSA, low-S form
+10. powSeed_ν ← Keccak256(VCT_ECCPOW ∥ chainId ∥ sealHash ∥ ν ∥ σ_ν)
+11. s_1 ← Keccak512(powSeed_ν)
+12. Generate hash vector r from s_1
+13. Regenerate parity-check matrix H from CodeLength and fixed degree parameters
+14. Verify that LDPC decoder D_mp(r, H) produces codeword c = header.Codeword
+15. Verify Hc = 0 and n/4 < W(c) < 3n/4
 ```
-포크 선택은 누적 체인 작업량 기준 Nakamoto 최장 체인 규칙을 따른다. 블록 $B_h$의 작업량은 $W(B_h) = 1/T_h$이며, 체인 점수는 $W(\text{chain}) = \sum_h W(B_h)$이다. 위 6가지 검증 조건 중 하나라도 실패한 블록은 작업량에 기여하지 않는다. 자격 임계값 $p_h$는 채굴 참여 자격을 제어하는 역할을 하며, 체인 작업량 계산에는 포함되지 않는다.
+포크 선택은 누적 체인 작업량 기준 Nakamoto 최장 체인 규칙을 따른다. 블록 $B_h$의 작업량은 $W(B_h) = 1/T_h$이며, 체인 점수는 $W(\text{chain}) = \sum_h W(B_h)$이다. 위 15가지 검증 조건 중 하나라도 실패한 블록은 작업량에 기여하지 않는다. 자격 임계값 $p_h$는 채굴 참여 자격을 제어하는 역할을 하며, 체인 작업량 계산에는 포함되지 않는다.
 
 ### p 조정
 
@@ -205,9 +253,25 @@ $$1 - (1-p_h)^G$$
 
 로 증가한다. 따라서 그라인딩 편향은 $p_h$만이 아니라 블록 생성자가 조작 가능한 헤더 필드, 트랜잭션 순서, 타임스탬프 선택 공간($G$)에 의해 결정된다. 완전한 해결을 위해서는 VDF(Verifiable Delay Function) 기반 랜덤 비콘과 같은 추가 메커니즘이 필요하며, 이는 향후 WIP에서 다룰 예정이다.
 
+### 위탁 채굴 저항성
+
+VCT의 계정 바인딩 ECCPoW는 공개된 VRF 자격 증명만을 이용한 독립적 위탁 채굴을 방지한다. 일반적인 ECCPoW 입력이 공개 block template과 nonce만으로 구성된다면, VRF 자격을 얻은 계정의 정보가 공개된 이후 제3자가 동일한 자격 정보를 사용하여 nonce 탐색을 대신 수행할 수 있다.
+
+VCT에서는 각 ECCPoW trial이 다음 값에 의존한다:
+
+$$\texttt{powSeed}_\nu = \mathrm{Keccak256}(\texttt{VCT\_ECCPOW} \| \texttt{chainId} \| \texttt{sealHash} \| \nu \| \sigma_\nu),$$
+
+여기서
+
+$$\sigma_\nu = \mathrm{Sign}_{sk_i}(\mathrm{Keccak256}(\texttt{VCT\_MINE} \| \texttt{chainId} \| \texttt{sealHash} \| \nu)).$$
+
+따라서 $sk_i$를 보유하지 않은 외부자는 유효한 $\sigma_\nu$를 생성할 수 없고, 결과적으로 유효한 ECCPoW hash-vector seed도 생성할 수 없다. 이는 VRF proof가 공개된 이후에도 제3자가 공개 데이터만으로 ECCPoW nonce search를 독립적으로 수행하는 것을 막는다.
+
+그러나 이 저항성은 완전한 mining-pool 방지를 의미하지 않는다. 계정 소유자가 개인키를 직접 공유하거나, nonce별 서명을 제공하는 온라인 signing service를 운영한다면 외부 worker가 ECCPoW 계산을 수행할 수 있다. VCT는 이러한 online delegation을 암호학적으로 제거하지 않는다. 대신 각 ECCPoW trial에 계정 서명 능력을 요구함으로써 공개 자격 증명만으로 가능한 offline delegation을 차단하고, 위탁 채굴의 운영 비용과 키 관리 위험을 증가시킨다.
+
 ### 키 보안
 
-계정 개인 키 $sk_i$가 ECVRF 계산과 블록 서명 모두에 사용되므로 핫 키 노출 위험이 존재한다. 채굴 노드 운영 시 적절한 키 관리 절차가 필요하다.
+계정 개인 키 $sk_i$가 ECVRF 계산과 논스별 채굴 서명 모두에 사용되며, 각 ECCPoW trial마다 서명이 요구되므로 핫 키가 채굴 노드에 상주해야 한다. 이는 키 노출 위험을 증가시키며, 채굴 노드 운영 시 적절한 키 관리 절차가 필요하다.
 
 ## 구현
 
@@ -218,9 +282,9 @@ VCT 프로토콜은 https://github.com/cryptoecc/WorldLand 에서 관리되는 g
 1. **secp256k1 ECVRF ciphersuite 정의** — hash-to-curve 방식, point encoding, scalar encoding, challenge hash, nonce derivation, proof-to-hash, public-key validation 절차를 합의 규칙으로 고정; 클라이언트 간 VRF 출력 불일치 방지
 2. **잔액 자격 확인** — 블록 검증 시 부모 상태에서 $\mathrm{Balance}_{h-1}(a_i) \geq S_0$ 직접 확인; 별도 레지스트리 불필요
 3. **secp256k1-VRF 통합** — 계정 개인 키를 사용하는 ECVRF 구현; 채굴 루프에서 $\texttt{VCT\_VRF} \| \texttt{chainId} \| \mathsf{phash}_{h-1} \| h$에 대한 블록당 VRF 평가 및 증명 생성
-4. **계정 바인딩 ECCPoW 챌린지** — ECCPoW 입력에 $\mathsf{phash}_{h-1}$, $h$, 계정 주소 $a_i$, 공개 키 $PK_i$, VRF 출력 $y_i$, VRF 증명 $\pi_i$ 포함
-5. **블록 헤더 확장** — 계정 주소 $a_i$, 공개 키 $PK_i$, VRF 출력 $y_i$, VRF 증명 $\pi_i$, ECCPoW nonce $\nu$, 계정 서명 $\sigma_i$를 위한 추가 필드
-6. **검증 로직** — 잔액 확인, 공개 키-주소 검증, VRF 증명 검증(proof-derived $y_i'$ 재계산 및 블록 기재값과 비교), 자격 임계값 확인, 계정 바인딩 ECCPoW 검증, 전체 헤더 커밋먼트에 대한 계정 서명 검증의 8단계 순차 확인; 검증 실패 블록은 체인 작업량에 기여하지 않음
+4. **논스별 채굴 서명 및 계정 바인딩 ECCPoW seed** — 각 nonce $\nu$마다 $m_\nu \leftarrow \mathrm{Keccak256}(\texttt{VCT\_MINE} \| \texttt{chainId} \| \texttt{sealHash} \| \nu)$를 계산하고, $\sigma_\nu \leftarrow \mathrm{Sign}_{sk_i}(m_\nu)$를 생성한다. 기존 WIP-2 ECCPoW의 $\mathrm{Keccak256}(\mathrm{CBH}) \| \nu$ 기반 hash-vector seed를 $\mathrm{Keccak256}(\texttt{VCT\_ECCPOW} \| \texttt{chainId} \| \texttt{sealHash} \| \nu \| \sigma_\nu)$로 대체한다. LDPC decoder와 codeword 유효성 조건은 기존 ECCPoW와 동일하게 유지한다.
+5. **블록 헤더 확장 및 sealHash 규칙** — 블록 헤더에는 $PK_i$, $y_i$, $\pi_i$, ECCPoW nonce $\nu$, Codeword, CodeLength, 논스별 채굴 서명 $\sigma_\nu$를 위한 필드가 추가된다. 단, $\texttt{sealHash}$는 $PK_i$, $y_i$, $\pi_i$, CodeLength 및 block template fields에는 커밋하지만, $\nu$, $\sigma_\nu$, Codeword는 제외한다. 이는 nonce search 결과에 의해 결정되는 값들이 $\texttt{sealHash}$에 포함되어 순환 의존성을 만드는 것을 방지하기 위함이다.
+6. **검증 로직** — 잔액 확인, 공개 키-주소 검증, VRF 증명 검증, 자격 임계값 확인, $\sigma_\nu$ 서명자 복원(ECRecover) 및 coinbase 일치 확인, 계정 바인딩 ECCPoW 검증의 9단계 순차 확인; 검증 실패 블록은 체인 작업량에 기여하지 않음
 7. **p 조정** — 에포크 단위로 관측된 블록 생성 간격 기반 $p$ 업데이트
 
 ## 참고문헌
