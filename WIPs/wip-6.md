@@ -32,7 +32,15 @@
 
 VCT는 검증자 레지스트리나 지분 가중 리더 선출을 도입하지 않는다. 단일 계정에 $S_0$ 이상을 보유해도 해당 계정의 자격 확률은 증가하지 않는다. 여러 자격 시도를 원하는 참여자는 각각 잔액 임계값을 충족하는 여러 계정을 유지해야 한다.
 
-합의 메커니즘의 변경은 핵심 프로토콜을 수정하므로 블록체인의 하드 포크를 유발한다. 업데이트된 프로토콜을 따르는 노드는 이전 프로토콜을 따르는 노드가 채굴한 블록을 더 이상 수락하지 않으며, 그 역도 마찬가지다.
+### WIP-6의 범위
+
+WIP-6 v1.0은 WorldLand의 장기 로드맵 전체를 한 번에 구현하는 것을 목표로 하지 않는다. 이 문서의 목적은 다음 세 요소를 하나의 실행 가능한 합의 파이프라인으로 통합하는 것이다.
+
+- 잔액 기반 PoS-style 자격 조건
+- secp256k1 기반 VRF coin toss
+- ECCPoW 채굴
+
+따라서 WIP-6 v1.0은 DID 기반 신원 바인딩, TPM 기반 하드웨어 바인딩, GPU attestation, GPU marketplace, tiered participation model을 의도적으로 제외한다. 이 요소들은 장기 로드맵에 속하며, 첫 번째 VCT 합의 구현에는 포함하지 않는다.
 
 ## 동기
 
@@ -44,7 +52,7 @@ VCT 프로토콜은 다른 위치를 점한다. 스테이킹 컨트랙트나 검
 
 잔액 임계값 $S_0$는 이 취약점을 완화하기 위한 ECCPoW 참여 사전 자격(prerequisite eligibility) 설계다. 각 자격 계정은 $S_0$ 이상의 잔액을 보유해야 하므로, 공격자가 $N_A$개의 자격 계정을 확보하려면 최소 $N_A \times S_0$의 자본을 소비해야 한다. 이는 PoS의 지분 가중 리더 선출과 구분된다. PoS에서는 지분 크기가 선출 확률에 직접 비례하지만, VCT에서는 임계값을 충족한 모든 계정이 동일한 확률 $p$로 VRF 자격 기회를 받는다. $S_0$는 지분에 비례한 영향력이 아니라 ECCPoW 참여를 위한 최소 진입 비용으로 설계된다.
 
-위원회도, 비잔틴 합의 프로토콜도, 투표 라운드도 없다. 시스템은 Bitcoin의 단순성을 유지하면서 활성 채굴 참여자 수를 줄이고 잔액 임계값 자격 조건을 도입한다.
+VCT v1.0은 검증자 레지스트리, 위원회 선출, BFT-style 투표 라운드를 도입하지 않는다. 잔액 임계값을 만족한 계정은 로컬에서 VRF를 평가하고, VRF 자격을 얻은 계정만 ECCPoW 채굴 루프에 참여한다. 최종 블록 경쟁은 Nakamoto 방식으로 유지되며, 유효한 ECCPoW 작업량에 의해 결정된다.
 
 ## 명세
 
@@ -68,29 +76,11 @@ $$\mathrm{Balance}_{h-\ell}(a_i) \geq S_0$$
 
 ### ECVRF 구조
 
-VCT는 RFC 9381의 ECVRF 구조를 따르는 secp256k1 기반 ECVRF instantiation을 사용한다. ECVRF는 ECDSA 서명 알고리즘과는 별개의 암호 구조로, Schnorr 방식의 비대화형 영지식 증명을 기반으로 한다. 단, RFC 9381의 표준 ciphersuite는 P-256 및 ED25519 곡선만을 정의하며 secp256k1은 포함되어 있지 않다. 따라서 VCT는 RFC 9381의 구조적 틀을 따르되, hash-to-curve, point encoding, challenge generation, nonce derivation, proof-to-hash 절차를 WorldLand 전용 ciphersuite로 명시해야 한다. 이 ciphersuite를 합의 규칙으로 고정하지 않으면 서로 다른 클라이언트가 동일 입력에 대해 서로 다른 VRF 출력을 생성하여 합의를 위반할 수 있다.
+VCT는 계정별 블록 자격 증명을 위해 secp256k1 기반 ECVRF 구성을 사용한다. ECVRF는 ECDSA 서명과 별개의 암호 구조이다. ECDSA는 논스별 채굴 서명에만 사용되고, ECVRF는 특정 블록 높이에서 계정이 ECCPoW 참여 자격을 얻었는지를 증명하는 데 사용된다.
 
-비밀 키 $sk_i$와 메시지 $m$이 주어졌을 때, ECVRF.Prove는 먼저 메시지를 타원 곡선 점으로 해시한 뒤 비밀 키를 곱하여 VRF 점을 생성한다:
+RFC 9381은 ECVRF의 일반 구조를 정의하지만, 표준 ciphersuite에는 secp256k1이 포함되어 있지 않다. 따라서 WorldLand는 hash-to-curve, point encoding, scalar encoding, challenge generation, nonce derivation, public-key validation, proof-to-hash 절차를 포함하는 WorldLand 전용 secp256k1 ECVRF ciphersuite를 합의 규칙으로 고정해야 한다. 이 ciphersuite를 합의 규칙으로 고정하지 않으면 서로 다른 클라이언트가 동일 입력에 대해 서로 다른 VRF 출력을 생성하여 합의를 위반할 수 있다.
 
-$$\Gamma_i = sk_i \cdot H_{\text{curve}}(m)$$
-
-여기서 $H_{\text{curve}}$는 메시지를 secp256k1 곡선 위의 점으로 해시하는 함수(hash-to-curve)이다. VRF 출력 $y_i$는 이 점의 해시값이다:
-
-$$y_i = \mathrm{Hash}(\Gamma_i)$$
-
-VRF 증명 $\pi_i = (c, s)$는 Schnorr 방식의 비대화형 증명으로, $\Gamma_i$가 비밀 키 $sk_i$에 의해 정직하게 생성되었음을 보증한다. 검증자는 $(PK_i,\, m,\, y_i,\, \pi_i)$가 주어지면 $sk_i$를 공개하지 않고도 다음 세 성질을 확인할 수 있다:
-
-1. **유일성(Uniqueness):** $(sk_i, m)$ 쌍에 대해 유효한 VRF 출력은 정확히 하나 존재한다. 동일한 입력에 대해 서로 다른 $y_i$를 주장하는 것은 ECDLP를 푸는 것과 동등하다.
-2. **의사난수성(Pseudorandomness):** $sk_i$를 모르는 당사자에게 $y_i$는 증명 $\pi_i$가 공개되기 전까지 계산적으로 균등한 난수와 구분할 수 없다.
-3. **검증 가능성(Verifiability):** $PK_i$가 있는 누구나 $\pi_i$로부터 $y_i$가 $sk_i$에 의해 정직하게 생성되었음을 검증할 수 있다.
-
-ECVRF 증명 $\pi_i$는 Schnorr 방식의 구조체이며, ECDSA 서명 $(r, s)$와는 다른 형태이다. ECDSA의 결정론적 nonce(RFC 6979)는 ECDSA 서명의 재현성을 보장하는 기법이지만 VRF를 구성하지 않는다. ECVRF는 독립적인 VRF 구조로, 동일한 secp256k1 키 쌍을 사용하되 별개의 알고리즘 구조를 따른다.
-
-**Ethereum 계정 인프라와의 관계.** WorldLand는 EVM 호환 체인이므로 계정 모델은 Ethereum의 외부 소유 계정(EOA) 구조를 따른다. Ethereum 계정은 secp256k1 개인 키로 트랜잭션과 메시지를 서명하며, 검증자는 서명으로부터 공개 키 또는 주소를 복원하여 계정 소유자의 승인을 확인한다. go-ethereum에 포함된 secp256k1 라이브러리는 ECDSA signing/verification과 RFC 6979 기반 nonce generation을 지원한다 [9]. 이는 Ethereum 계정 생태계가 이미 secp256k1 기반 계정 인증과 결정론적 서명 구현 경험을 갖고 있음을 의미한다.
-
-그러나 RFC 6979 기반 ECDSA는 그 자체로 VRF가 아니다. 정직한 서명자가 동일한 개인 키와 메시지에 대해 재현 가능한 서명을 생성할 수 있더라도, 검증자가 서명자가 올바른 절차를 따랐는지 공개적으로 증명받는 구조가 없다. 즉, VRF가 요구하는 공개 검증 가능한 유일성과 의사난수성은 ECDSA만으로는 보장되지 않는다.
-
-VCT의 핵심은 Ethereum의 ECDSA 서명을 VRF로 재해석하는 것이 아니라, 기존 secp256k1 계정 키 쌍을 그대로 ECVRF 키로 활용하는 것이다. 역할은 명확히 분리된다. ECVRF는 특정 블록 높이에서 해당 계정이 ECCPoW 자격을 얻었는지를 증명하는 데 사용되고, ECDSA는 논스별 채굴 서명에 사용된다.
+이 문서에서 $\pi_i$는 선택된 secp256k1 ECVRF 구현이 생성하는 proof object를 의미한다. 정확한 proof encoding은 이 문서에서 임의로 재정의하지 않고, WorldLand secp256k1 ECVRF ciphersuite에서 고정한다. VCT는 deterministic ECDSA signature를 VRF proof로 재해석하지 않는다.
 
 ### VRF 키 쌍 사용 방식
 
@@ -114,7 +104,7 @@ $$\mathrm{Verify}_{PK_i}(m_\nu,\, \sigma_\nu) = 1$$
 
 이 두 검증을 통해 블록 생성자가 계정 주소 $a_i$에 대응하는 개인 키를 보유하고 있으며, 동일한 키로 VRF 자격 증명과 채굴 서명을 모두 생성했음을 확인한다. 별도 VRF 키 등록 절차가 없으며, 계정 식별과 VRF 자격 증명이 통합된다.
 
-**secp256k1 기반 VRF.** 일반적인 ECDSA에서는 서명 nonce $k$가 외부 난수에 의존할 수 있어, 동일한 메시지와 개인 키에 대해서도 서명이 달라질 수 있다. 이 비결정성은 동일 입력에 대해 재현 가능한 증명과 출력을 요구하는 VRF 구성에는 적합하지 않다. Ethereum의 secp256k1 ECDSA 구현은 RFC 6979 기반 결정론적 nonce 생성을 사용하여 $k$를 메시지와 개인 키로부터 결정론적으로 유도하므로, 동일한 secp256k1 키 소재를 VRF 구성으로 자연스럽게 확장할 수 있다. WIP-6은 별도의 P-256 또는 Edwards25519 VRF 키를 도입하지 않고, Ethereum 계정의 secp256k1 키 쌍으로 VRF 증명과 논스별 채굴 서명을 모두 생성한다. 구현 참조로 aergoio/secp256k1-vrf [10] 및 vechain/go-ecvrf [11]를 사용한다.
+**secp256k1 기반 VRF.** Ethereum 계정 인프라는 이미 트랜잭션과 메시지 인증을 위해 secp256k1 계정 키를 사용하며, 일반적인 구현은 ECDSA signing에서 결정론적 nonce generation을 사용한다. 이는 구현 배경일 뿐이며, ECDSA 자체를 VRF로 사용한다는 의미는 아니다. WIP-6은 동일한 secp256k1 계정 키 쌍을 ECVRF 입력 키 쌍으로 재사용하여 별도 VRF 키 등록 절차를 제거한다. ECVRF와 ECDSA는 서로 다른 역할을 가진다. ECVRF는 블록 자격을 증명하고, ECDSA는 논스별 채굴 메시지를 서명한다. 구현 참조로 aergoio/secp256k1-vrf [10] 및 vechain/go-ecvrf [11]를 사용한다.
 
 **이유.** 계정 키 재사용은 별도 VRF 공개 키 등록 절차 없이 기존 Ethereum 계정 인프라를 그대로 활용하며, DID 없는 v1.0 설계에서 구현과 사용자 경험을 단순화한다.
 
@@ -148,11 +138,21 @@ $$s_1 := \mathrm{Keccak512}(\mathrm{Keccak256}(\mathrm{CBH}) \| \nu).$$
 
 $$\texttt{sealHash} := \mathrm{Keccak256}\!\left(\texttt{VCT}\_\texttt{SEAL} \| \mathrm{RLP}(\mathsf{HeaderFields},\, \mathsf{VRFFields},\, \mathsf{ECCPoWParams})\right)$$
 
-여기서:
-- $\mathsf{HeaderFields} = (\texttt{chainId},\, \mathsf{phash}_{h-1},\, h,\, a_i,\, \texttt{timestamp},\, \texttt{stateRoot},\, \texttt{txRoot},\, \texttt{receiptRoot},\, \texttt{gasLimit},\, \texttt{gasUsed},\, \ldots)$
-- $\mathsf{VRFFields} = (PK_i,\, y_i,\, \pi_i)$
-- $\mathsf{ECCPoWParams} = (\texttt{CodeLength})$
-- 제외: $\nu$, $\sigma_\nu$, $\texttt{Codeword}$ — ECCPoW 탐색 결과로 결정되므로 순환 의존성 방지
+`HeaderFields`의 정확한 순서와 필드 목록은 consensus-critical하다. 각 클라이언트가 임의로 선택해서는 안 되며, WorldLand 클라이언트 구현에서 하나의 고정된 ordered tuple로 정의되어야 한다.
+
+최소한 `sealHash`는 다음 항목에 커밋해야 한다:
+- chainId
+- parent block hash $\mathsf{phash}_{h-1}$
+- block height $h$
+- block producer address $a_i$
+- timestamp
+- transaction root, state root, receipt root
+- gas limit 및 gas used
+- VRF public key $PK_i$, VRF output $y_i$, VRF proof $\pi_i$
+- ECCPoW CodeLength 및 고정 ECCPoW parameter
+
+다음 항목은 ECCPoW 탐색 과정에서 결정되므로 `sealHash`에서 제외한다:
+- nonce $\nu$, mining signature $\sigma_\nu$, Codeword
 
 각 nonce $\nu$에 대해 채굴자는 다음 메시지를 서명한다:
 
@@ -221,7 +221,7 @@ $$s_u := \mathrm{Keccak512}(s_{u-1}), \quad u \geq 2.$$
     ▷ HeaderFields contains chainId; sealHash excludes ν, σ_ν, Codeword
 8.  m_ν ← Keccak256(VCT_MINE ∥ sealHash ∥ ν)
 9.  Require ECRecover(σ_ν, m_ν) = a_i
-    ▷ σ_ν의 서명자가 블록 coinbase와 일치하는지 확인; valid secp256k1 ECDSA, low-S form
+    ▷ σ_ν의 서명자가 헤더에 명시된 블록 생성자 주소 $a_i$와 일치하는지 확인; valid secp256k1 ECDSA, low-S form
 10. powSeed_ν ← Keccak256(VCT_ECCPOW ∥ sealHash ∥ ν ∥ σ_ν)
 11. s_1 ← Keccak512(powSeed_ν)
 12. Generate hash vector r from s_1
@@ -244,6 +244,8 @@ $$p_{e+1} = \mathrm{clip}\!\left(p_e \cdot \frac{\Delta_{\mathrm{observed}}}{\De
 - $r$: 한 에포크에서 $p$의 최대 변화 배율 (예: $r = 4$)
 
 블록이 너무 자주 생성되면 $p$를 낮춰 참여자 수를 줄이고, 너무 느리게 생성되면 $p$를 높여 더 많은 계정이 ECCPoW를 시도하게 한다. 이 조정은 잔액 조건을 충족한 총 계정 수 $N$을 명시적으로 세지 않아도 작동한다.
+
+에포크 길이, 초기값 $p_0$, 상하한, 타임스탬프 처리 규칙은 활성화 이전에 WorldLand 클라이언트 구현에서 고정되어야 한다.
 
 ## 보안 분석
 
@@ -283,13 +285,9 @@ $$h_A N_A > h_H N_H$$
 
 ### 부모 해시 그라인딩
 
-현재 블록 생성자는 트랜잭션 선택, 순서 변경, 또는 채굴 타이밍 조작을 통해 서로 다른 $\mathsf{phash}_{h-1}$ 후보를 생성하고, 어느 값이 다음 블록에서 자신의 계정에 유리한 VRF 출력을 만드는지 사전에 확인할 수 있다. 이를 부모 해시 그라인딩이라 한다.
+VRF 입력이 canonical parent block hash를 포함하므로, VCT v1.0은 부모 해시 그라인딩을 완전히 제거하지 않는다. 블록 생성자는 트랜잭션 순서, 타임스탬프 선택, 블록 withholding 등을 통해 다음 VRF 입력에 제한적으로 영향을 줄 수 있다.
 
-ECCPoW 챌린지에 계정 바인딩을 도입함으로써 VRF 자격 증명의 전이적 재사용은 방지하였으나, 부모 해시 선택 자체에서 발생하는 그라인딩은 VCT v1에서 완전히 제거되지 않는다. 공격자가 $G$개의 부모 해시 후보를 탐색할 수 있다면, 특정 공격자 계정이 다음 높이에서 적어도 한 번 VRF 자격을 얻을 확률은:
-
-$$1 - (1-p_h)^G$$
-
-로 증가한다. 따라서 그라인딩 편향은 $p_h$만이 아니라 블록 생성자가 조작 가능한 헤더 필드, 트랜잭션 순서, 타임스탬프 선택 공간($G$)에 의해 결정된다. 완전한 해결을 위해서는 VDF(Verifiable Delay Function) 기반 랜덤 비콘과 같은 추가 메커니즘이 필요하며, 이는 향후 WIP에서 다룰 예정이다.
+WIP-6은 이를 v1.0 설계의 명시적 한계로 둔다. 이 버전의 목적은 최소한의 balance-gated VRF-ECCPoW 파이프라인을 구현하는 것이므로, VDF나 외부 randomness beacon은 도입하지 않는다.
 
 ### 위탁 채굴 저항성
 
@@ -315,15 +313,17 @@ $$\sigma_\nu = \mathrm{Sign}_{sk_i}(\mathrm{Keccak256}(\texttt{VCT}\_\texttt{MIN
 
 VCT 프로토콜은 https://github.com/cryptoecc/WorldLand 에서 관리되는 go-ethereum의 EVM 호환 포크인 WorldLand 클라이언트의 합의 엔진으로 구현될 예정이다.
 
-현재 ECCPoW 구현 대비 필요한 변경 사항은 다음과 같다:
+WIP-6은 기존 ECCPoW 클라이언트 대비 다음 다섯 가지 변경을 요구한다.
 
-1. **secp256k1 ECVRF ciphersuite 정의** — hash-to-curve 방식, point encoding, scalar encoding, challenge hash, nonce derivation, proof-to-hash, public-key validation 절차를 합의 규칙으로 고정; 클라이언트 간 VRF 출력 불일치 방지
-2. **잔액 자격 확인** — 블록 검증 시 $\mathrm{Balance}_{h-\ell}(a_i) \geq S_0$ 직접 확인($\ell = 1$, v1.0 기본값); 별도 레지스트리 불필요
-3. **secp256k1-VRF 통합** — 계정 개인 키를 사용하는 ECVRF 구현; 채굴 루프에서 $\texttt{VCT}\_\texttt{VRF} \| \texttt{chainId} \| \mathsf{phash}_{h-1} \| h$에 대한 블록당 VRF 평가 및 증명 생성
-4. **논스별 채굴 서명 및 계정 바인딩 ECCPoW seed** — 각 nonce $\nu$마다 $m_\nu \leftarrow \mathrm{Keccak256}(\texttt{VCT}\_\texttt{MINE} \| \texttt{sealHash} \| \nu)$를 계산하고, $\sigma_\nu \leftarrow \mathrm{Sign}_{sk_i}(m_\nu)$를 생성한다. 기존 WIP-2 ECCPoW의 $\mathrm{Keccak256}(\mathrm{CBH}) \| \nu$ 기반 hash-vector seed를 $\mathrm{Keccak256}(\texttt{VCT}\_\texttt{ECCPOW} \| \texttt{sealHash} \| \nu \| \sigma_\nu)$로 대체한다. LDPC decoder와 codeword 유효성 조건은 기존 ECCPoW와 동일하게 유지한다.
-5. **블록 헤더 확장 및 sealHash 규칙** — 블록 헤더에는 $PK_i$, $y_i$, $\pi_i$, ECCPoW nonce $\nu$, Codeword, CodeLength, 논스별 채굴 서명 $\sigma_\nu$를 위한 필드가 추가된다. $\texttt{sealHash}$는 $\mathrm{Keccak256}(\texttt{VCT}\_\texttt{SEAL} \| \mathrm{RLP}(\mathsf{HeaderFields},\, \mathsf{VRFFields},\, \mathsf{ECCPoWParams}))$으로 계산되며, $\texttt{chainId}$는 $\mathsf{HeaderFields}$ 내에 포함된다. $\nu$, $\sigma_\nu$, $\texttt{Codeword}$는 제외하여 순환 의존성을 방지한다.
-6. **검증 로직** — 잔액 확인, 공개 키-주소 검증, VRF 증명 검증, 자격 임계값 확인, $\sigma_\nu$ 서명자 복원(ECRecover) 및 coinbase 일치 확인, 계정 바인딩 ECCPoW 검증의 9단계 순차 확인; 검증 실패 블록은 체인 작업량에 기여하지 않음
-7. **p 조정** — 에포크 단위로 관측된 블록 생성 간격 기반 $p$ 업데이트
+1. **잔액 기반 자격 확인** — 블록 검증 시 $\mathrm{Balance}_{h-\ell}(a_i) \geq S_0$를 직접 확인한다($\ell = 1$, v1.0 기본값). 별도 레지스트리나 등록 트랜잭션이 필요 없다.
+
+2. **secp256k1 기반 ECVRF 통합** — 클라이언트는 secp256k1 ECVRF 구현을 통합하고, 채굴 루프에서 블록 높이마다 $\mathrm{ECVRF.Prove}(sk_i,\, \texttt{VCT}\_\texttt{VRF} \| \texttt{chainId} \| \mathsf{phash}_{h-1} \| h)$를 한 번 평가한다. 사용할 secp256k1 ECVRF ciphersuite는 합의 규칙으로 고정되어야 한다.
+
+3. **계정 키 재사용 및 공개 키-주소 바인딩** — 블록 헤더에 $a_i$와 $PK_i$를 포함한다. 검증자는 $\mathrm{Address}(PK_i) = a_i$를 확인한 후, 동일한 $PK_i$로 VRF 증명과 논스별 채굴 서명을 각각 검증한다.
+
+4. **논스별 채굴 서명 및 ECCPoW seed 교체** — 각 nonce $\nu$마다 $m_\nu \leftarrow \mathrm{Keccak256}(\texttt{VCT}\_\texttt{MINE} \| \texttt{sealHash} \| \nu)$를 계산하고 $\sigma_\nu \leftarrow \mathrm{Sign}_{sk_i}(m_\nu)$를 생성한다. 기존 WIP-2의 $\mathrm{Keccak256}(\mathrm{CBH}) \| \nu$ 기반 hash-vector seed를 $\mathrm{Keccak256}(\texttt{VCT}\_\texttt{ECCPOW} \| \texttt{sealHash} \| \nu \| \sigma_\nu)$로 대체한다. LDPC decoder와 codeword 유효성 조건은 WIP-2와 동일하게 유지한다.
+
+5. **sealHash 및 블록 검증 갱신** — 블록 헤더에 $PK_i$, $y_i$, $\pi_i$, $\nu$, Codeword, CodeLength, $\sigma_\nu$ 필드를 추가한다. 클라이언트는 고정된 HeaderFields에서 `sealHash`를 재계산하고, $\mathrm{ECRecover}(\sigma_\nu, m_\nu) = a_i$를 확인한 뒤, ECCPoW hash vector를 재생성하여 codeword를 검증한다. 검증 실패 블록은 체인 작업량에 기여하지 않는다.
 
 ## 참고문헌
 
