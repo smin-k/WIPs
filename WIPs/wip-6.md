@@ -21,8 +21,10 @@
   - [블록 생성 및 검증](#블록-생성-및-검증)
   - [p 조정](#p-조정)
 * [보안 분석](#보안-분석)
+* [하위 호환성](#하위-호환성)
 * [구현](#구현)
 * [참고문헌](#참고문헌)
+* [저작권](#저작권)
 
 ## 개요
 
@@ -309,6 +311,24 @@ $$\sigma_\nu = \mathrm{Sign}_{sk_i}(\mathrm{Keccak256}(\texttt{VCT}\_\texttt{MIN
 
 계정 개인 키 $sk_i$가 ECVRF 계산과 논스별 채굴 서명 모두에 사용되며, 각 ECCPoW trial마다 서명이 요구되므로 핫 키가 채굴 노드에 상주해야 한다. 이는 키 노출 위험을 증가시키며, 채굴 노드 운영 시 적절한 키 관리 절차가 필요하다.
 
+## 하위 호환성
+
+WIP-6은 하드 포크를 통해 활성화되며, 이전 클라이언트와 호환되지 않는 프로토콜 변경을 포함한다.
+
+**프로토콜 수준 비호환성.** VCTBlock 이후에는 다음 규칙이 기존 규칙을 대체한다.
+
+- **논스별 채굴 서명 공식 변경.** $m_\nu$ 계산에서 `chainId`가 제거된다. `chainId`는 이미 `sealHash` 내부의 `HeaderFields`에 포함되어 있으므로, VCTBlock 이전의 $\mathrm{Keccak256}(\texttt{VCT}\_\texttt{MINE} \| \texttt{chainId} \| \texttt{sealHash} \| \nu)$ 공식은 $\mathrm{Keccak256}(\texttt{VCT}\_\texttt{MINE} \| \texttt{sealHash} \| \nu)$로 단순화된다.
+
+- **ECCPoW seed 공식 변경.** 동일한 이유로 $\texttt{powSeed}_\nu$ 계산에서도 `chainId`가 제거된다.
+
+- **VRF 입력 메시지 변경.** VRF 입력이 epoch 기반 sortition seed hash에서 $\texttt{VCT}\_\texttt{VRF} \| \texttt{chainId} \| \mathsf{phash}_{h-1} \| h$로 변경된다. 이 변경으로 VRF 자격이 특정 chain, 특정 부모 블록, 특정 높이에 명시적으로 바인딩된다.
+
+- **주소 검증 추가.** 블록 헤더의 $PK_i$로부터 유도한 주소가 $a_i$와 일치하는지 ($\mathrm{Address}(PK_i) = a_i$) 검증하는 단계가 추가된다.
+
+**업그레이드 경로.** VCTBlock 이전까지 모든 노드는 기존 ECCPoW 검증 규칙을 따른다. VCTBlock 활성화 이후, WIP-6을 구현하지 않은 노드는 새 규칙으로 생성된 블록을 거부하여 네트워크에서 분리된다. 충분히 먼 미래의 블록 번호를 VCTBlock으로 설정하여 네트워크 참여자가 클라이언트를 업그레이드할 시간을 확보한다.
+
+**채굴자 요구 사항.** VCTBlock 활성화 이후 채굴자는 각 ECCPoW trial마다 $\sigma_\nu$ 생성에 계정 개인 키가 필요하므로, 개인 키를 채굴 노드에 직접 제공해야 한다.
+
 ## 구현
 
 VCT 프로토콜은 https://github.com/cryptoecc/WorldLand 에서 관리되는 go-ethereum의 EVM 호환 포크인 WorldLand 클라이언트의 합의 엔진으로 구현될 예정이다.
@@ -338,3 +358,7 @@ WIP-6은 기존 ECCPoW 클라이언트 대비 다음 다섯 가지 변경을 요
 [9] Ethereum Foundation, go-ethereum crypto/secp256k1 — libsecp256k1 wrapper, https://github.com/ethereum/go-ethereum/tree/master/crypto/secp256k1.  
 [10] aergoio, secp256k1-vrf — secp256k1 ECVRF implementation, https://github.com/aergoio/secp256k1-vrf.  
 [11] vechain, go-ecvrf — Go ECVRF library, https://github.com/vechain/go-ecvrf.  
+
+## 저작권
+
+Copyright and related rights released under the [GNU Lesser General Public License v3.0](https://www.gnu.org/licenses/lgpl-3.0.html).
