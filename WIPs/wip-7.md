@@ -12,7 +12,7 @@
 
 ## Abstract / 개요
 
-이 문서는 Rokis 하드포크 이후 WorldLand의 블록 보상 및 프로토콜 트레저리 분배 규칙을 정의한다. WIP-6은 VCT 합의의 proposer eligibility, VRF sortition, ECCPoW seed, 블록 검증 규칙을 정의한다. 본 WIP는 그 합의 규칙 위에서 VCTBlock 이후 적용되는 보상 상태 전이만을 별도로 명세한다.
+Rokis 하드포크 이후 WorldLand의 블록 보상 및 프로토콜 트레저리 분배 규칙을 정의한다. VCT 합의의 proposer eligibility, VRF sortition, ECCPoW seed, 블록 검증 규칙은 WIP-6에서 정의하며, VCTBlock 이후 적용되는 보상 상태 전이는 별도 규칙으로 다룬다.
 
 Rokis 이전의 pre-VCT 구간에서는 기존 Seoul/ECCPoW 보상 정책을 그대로 유지한다. Rokis 이후의 VCT 구간에서는 블록 기본 보상을 20 WL로 설정하고, 블록 생성자 보상과 uncle 보상을 합산한 총 보상 중 20%를 프로토콜 트레저리 주소로 지급하며, 나머지 80%를 블록 생성자에게 지급한다.
 
@@ -26,7 +26,7 @@ VCT는 기존 ECCPoW 채굴 규칙에 VRF 기반 사전 자격 조건과 계정 
 
 ### Fork Boundary
 
-`VCTBlock` 이전의 모든 블록은 기존 Seoul/ECCPoW 보상 정책을 사용한다. `VCTBlock` 이상인 모든 블록은 본 WIP의 Rokis 보상 정책을 사용한다.
+`VCTBlock` 이전의 모든 블록은 기존 Seoul/ECCPoW 보상 정책을 사용한다. `VCTBlock` 이상인 모든 블록은 Rokis 보상 정책을 사용한다.
 
 ```text
 if block.number < VCTBlock:
@@ -73,7 +73,7 @@ pre-VCT 구간에서 레거시 보상을 유지하는 것은 하드포크 이전
 
 ## Backwards Compatibility / 하위 호환성
 
-이 WIP는 하드포크를 통해 활성화되며, VCTBlock 이후의 state transition을 변경한다. WIP-7을 구현하지 않은 클라이언트는 VCTBlock 이후 블록의 보상 상태 전이를 다르게 계산할 수 있으므로 Rokis 체인과 호환되지 않는다.
+Rokis 보상 규칙은 하드포크를 통해 활성화되며, VCTBlock 이후의 state transition을 변경한다. 이 규칙을 구현하지 않은 클라이언트는 VCTBlock 이후 블록의 보상 상태 전이를 다르게 계산할 수 있으므로 Rokis 체인과 호환되지 않는다.
 
 VCTBlock 이전 블록은 기존 Seoul/ECCPoW 보상 정책을 그대로 사용하므로 하위 호환성을 유지한다.
 
@@ -88,18 +88,12 @@ else:
     accumulateRewardsRokis(...)
 ```
 
-구현이 완료된 것으로 간주되려면 다음 테스트 요구 사항을 충족해야 한다.
-
-- [ ] VCTBlock-1 블록에 레거시 보상 4 WL 및 기존 halving/maturity 규칙이 적용되는지 검증
-- [ ] VCTBlock 블록에 Rokis 보상 20 WL이 적용되는지 검증
-- [ ] Rokis 블록에서 총 보상 중 20%가 트레저리 주소로 지급되는지 검증
-- [ ] Rokis 블록에서 총 보상 중 80%가 블록 생성자에게 지급되는지 검증
-- [ ] pre-VCT 블록에 트레저리 분배가 적용되지 않는지 검증
+구현은 VCTBlock 경계에서 레거시 보상과 Rokis 보상을 명확히 분기해야 하며, pre-VCT 블록에는 트레저리 분배를 적용하지 않아야 한다.
 
 ## References / 참고문헌
 
-[1] WIP-6: Verifiable Coin Toss.  
-[2] WIP-8: Rokis Hardfork Meta.  
+[1] WIP-6: Verifiable Coin Toss.
+[2] WIP-8: Rokis Hardfork Meta.
 
 ## Copyright / 저작권
 

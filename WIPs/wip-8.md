@@ -12,13 +12,13 @@
 
 ## Abstract / 개요
 
-이 문서는 Rokis 하드포크의 활성화 파라미터와 포함 WIP 목록을 정의하는 메타 WIP이다. Rokis는 Seoul/ECCPoW 체인을 WIP-6의 VCT 합의 규칙으로 전환하고, WIP-7의 보상 및 트레저리 규칙을 활성화한다.
+Rokis 하드포크의 활성화 파라미터와 포함 WIP 목록을 정의한다. Rokis는 Seoul/ECCPoW 체인을 VCT 합의 규칙으로 전환하고, 보상 및 트레저리 규칙을 함께 활성화한다.
 
-본 문서는 VCT의 세부 합의 규칙을 다시 정의하지 않는다. VCT의 proposer eligibility, ECVRF ciphersuite, sortition, progressive timeout, mining signature, ECCPoW seed, 블록 검증 규칙은 WIP-6에 정의되어 있다. Rokis 이후의 보상 및 트레저리 분배 규칙은 WIP-7에 정의되어 있다.
+VCT의 세부 합의 규칙은 여기서 다시 정의하지 않는다. proposer eligibility, ECVRF ciphersuite, sortition, progressive timeout, mining signature, ECCPoW seed, 블록 검증 규칙은 WIP-6에 정의되어 있다. Rokis 이후의 보상 및 트레저리 분배 규칙은 WIP-7에 정의되어 있다.
 
 ## Motivation / 동기
 
-Ethereum의 hardfork meta EIP처럼, WorldLand도 개별 프로토콜 변경 WIP와 특정 네트워크 업그레이드의 활성화 정보를 분리할 필요가 있다. WIP-6과 WIP-7은 각각 합의 규칙과 보상 규칙을 정의하지만, Seoul 네트워크에서 어느 블록에 어떤 변경을 함께 활성화할지는 별도의 메타 문서가 담당하는 것이 명확하다.
+Ethereum의 hardfork meta EIP처럼, WorldLand도 개별 프로토콜 변경 WIP와 특정 네트워크 업그레이드의 활성화 정보를 분리할 필요가 있다. 합의 규칙과 보상 규칙은 각각 별도 WIP에서 정의하고, Seoul 네트워크에서 어느 블록에 어떤 변경을 함께 활성화할지는 메타 문서에서 지정한다.
 
 이 분리는 두 가지 장점을 가진다. 첫째, 프로토콜 설계와 배포 일정을 독립적으로 검토할 수 있다. 둘째, 클라이언트 구현자가 특정 하드포크에 포함되는 WIP 목록을 한 곳에서 확인할 수 있다.
 
@@ -85,17 +85,13 @@ Vct:
   InitialSortitionThreshold: 256
 ```
 
-구현이 완료된 것으로 간주되려면 다음 테스트 요구 사항을 충족해야 한다.
-
-- [ ] Seoul 기존 DB에서 VCT 엔진 선택이 문제없이 수행되는지 확인
-- [ ] 신규 Seoul node에서 VCTBlock 이전 pre-VCT 블록이 기존 ECCPoW와 호환되는지 확인
-- [ ] VCTBlock 경계에서 legacy rule과 VCT rule이 정확히 분기되는지 확인
+클라이언트는 기존 Seoul DB와 신규 Seoul node 모두에서 동일한 chain config를 사용해야 하며, VCTBlock 경계에서 legacy rule과 Rokis rule을 정확히 분기해야 한다.
 
 ## References / 참고문헌
 
-[1] WIP-6: Verifiable Coin Toss.  
-[2] WIP-7: Rokis Reward and Treasury.  
-[3] EIP-1716: Hardfork Meta: Petersburg.  
+[1] WIP-6: Verifiable Coin Toss.
+[2] WIP-7: Rokis Reward and Treasury.
+[3] EIP-1716: Hardfork Meta: Petersburg.
 
 ## Copyright / 저작권
 
