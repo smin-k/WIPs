@@ -1,0 +1,156 @@
+\begin{tikzpicture}[
+    font=\sffamily\small,
+    >=Latex,
+    state/.style={
+        rectangle,
+        rounded corners=2.5pt,
+        draw=black!62,
+        fill=gray!4,
+        align=center,
+        minimum width=3.12cm,
+        minimum height=1.08cm,
+        inner sep=5.5pt,
+        line width=0.65pt
+    },
+    gate/.style={
+        diamond,
+        aspect=1.75,
+        draw=black!62,
+        fill=white,
+        align=center,
+        inner sep=1.2pt,
+        line width=0.65pt
+    },
+    vrf/.style={
+        state,
+        draw=blue!55!black,
+        fill=blue!5
+    },
+    pow/.style={
+        state,
+        draw=orange!70!black,
+        fill=orange!8,
+        minimum width=3.95cm,
+        minimum height=1.55cm
+    },
+    verifybox/.style={
+        state,
+        draw=green!40!black,
+        fill=green!6
+    },
+    wait/.style={
+        state,
+        draw=black!45,
+        fill=black!2,
+        minimum width=3.0cm
+    },
+    arrow/.style={->, line width=0.85pt, draw=black!72},
+    bluearrow/.style={->, line width=0.9pt, draw=blue!58!black},
+    orangearrow/.style={->, line width=0.9pt, draw=orange!72!black},
+    greenarrow/.style={->, line width=0.9pt, draw=green!43!black},
+    grayarrow/.style={->, line width=0.8pt, dashed, draw=black!52},
+    label/.style={
+        font=\sffamily\scriptsize,
+        fill=white,
+        fill opacity=0.88,
+        text opacity=1,
+        draw=black!18,
+        rounded corners=1.2pt,
+        line width=0.25pt,
+        inner xsep=2.2pt,
+        inner ysep=0.8pt,
+        text=black!85
+    }
+]
+
+% Iteration note
+\node[font=\sffamily\small\bfseries, text=black!65] at (9.1, 3.25) {
+    WIP-6 consensus protocol flow at each block height
+};
+
+% Eligibility path
+\node[state] (parent) at (0, 1.8) {
+    {\bfseries New height}\\
+    parent $(H_{h-1},h)$
+};
+\node[gate] (balance) at (3.35, 1.8) {
+    balance\\
+    $\ge S_0$?
+};
+\node[vrf] (vrf) at (6.85, 1.8) {
+    {\bfseries ECVRF eligibility}\\
+    prove with account key\\
+    check threshold
+};
+\node[gate] (selected) at (10.35, 1.8) {
+    selected?
+};
+\node[pow] (mine) at (14.2, 1.8) {
+    {\bfseries Key-bound ECCPoW}\\
+    repeat nonce trials\\
+    sign $m_\nu$ and test $\texttt{powSeed}_\nu$
+};
+
+% Waiting states
+\node[wait] (nobalance) at (3.35, -0.95) {
+    No balance\\
+    stop mining for $h$
+};
+\node[wait] (notselected) at (10.35, -0.95) {
+    Not selected\\
+    wait next block\\
+    or timeout threshold
+};
+
+% Mining outcomes
+\node[gate] (event) at (14.2, -0.95) {
+    first\\
+    event?
+};
+\node[state] (broadcast) at (10.35, -3.55) {
+    {\bfseries Local solution}\\
+    broadcast block
+};
+\node[verifybox] (recv) at (17.95, -3.55) {
+    {\bfseries External block}\\
+    verify received block
+};
+\node[gate] (valid) at (17.95, -6.05) {
+    valid?
+};
+\node[verifybox, minimum width=3.55cm] (next) at (10.35, -6.05) {
+    {\bfseries Next height}\\
+    mine on the accepted\\
+    chain tip
+};
+
+% Main arrows
+\draw[arrow] (parent) -- (balance);
+\draw[arrow] (balance) -- node[label, above] {yes} (vrf);
+\draw[bluearrow] (vrf) -- (selected);
+\draw[bluearrow] (selected) -- node[label, above] {yes} (mine);
+\draw[orangearrow] (mine) -- (event);
+
+% Negative eligibility paths
+\draw[grayarrow] (balance) -- node[label, right] {no} (nobalance);
+\draw[grayarrow] (selected) -- node[label, right] {no} (notselected);
+\draw[grayarrow] (nobalance) |- (next);
+\draw[grayarrow] (notselected.south west) to[out=-120,in=105]
+    (next.north west);
+\draw[bluearrow, dashed] (notselected.east) to[out=15,in=-125]
+    node[label, below] {timeout opens}
+    (mine.south west);
+
+% Mining-loop outcomes
+\draw[orangearrow] (event) -- node[label, above] {local solution} (broadcast);
+\draw[greenarrow] (event) -- node[label, above] {received block} (recv);
+\draw[greenarrow] (recv) -- (valid);
+\draw[greenarrow] (valid) -- node[label, below] {yes} (next);
+\draw[greenarrow] (broadcast) -- (next);
+
+% Invalid received block: continue mining.
+\draw[grayarrow] (valid.east) to[out=0,in=-35]
+    node[label, right] {no, keep mining}
+    (mine.east);
+
+\end{tikzpicture}
