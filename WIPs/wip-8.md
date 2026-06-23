@@ -49,7 +49,9 @@ fork difficulty policy: inherit parent difficulty
 initial sortitionThreshold: 2^256 (p = 1.0, bootstrap all eligible)
 P_base (target SortitionBase): 2^253 (12.5%, p* = 1/8)
 TimeoutStart: 15 seconds
-TimeoutEnd: 60 seconds
+TimeoutEnd: 70 seconds (ceil of the 99.9% exponential quantile for 10s mean block discovery)
+VCTFutureTolerance: 5 seconds
+raw header full-open time: 75 seconds
 
 VCT block reward: 20 WL
 treasury split: 20%
